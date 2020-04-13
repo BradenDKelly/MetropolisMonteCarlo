@@ -18,12 +18,12 @@ Random.seed!(11234)
 
 temperature = 1.0 #0.8772  # 1.2996
 ρ = 0.75
-nAtoms = 256 * 10
-ϵ = 1.0
-σ = 1.0
+nAtoms = 256
+#ϵ = 1.0
+#σ = 1.0
 r_cut = 2.5  # box / 2
 nSteps = 1000
-nblock = 10
+nblock = 100
 outputInterval = 100
 initialConfiguration = "crystal"  # place atoms in a crystal structure
 
@@ -127,7 +127,7 @@ function potential_lrc( ρ, r_cut )
     """Calculates long-range correction for Lennard-Jones potential per atom."""
 
     # density, r_cut, and the results, are in LJ units where sigma = 1, epsilon = 1
-    sr3 = 1.0 / r_cut^3 
+    sr3 = 1.0 / r_cut^3
     return π * ( (8.0/9.0)  * sr3^3  - (8.0/3.0)  * sr3 ) * ρ
 end
 
@@ -135,14 +135,14 @@ function pressure_lrc( ρ, r_cut )
     """Calculates long-range correction for Lennard-Jones pressure."""
 
     # density, r_cut, and the results, are in LJ units where sigma = 1, epsilon = 1
-    sr3 = 1.0 / r_cut ^ 3 
+    sr3 = 1.0 / r_cut ^ 3
     return π * ( (32.0/9.0) * sr3 ^ 3  - (16.0/3.0) * sr3 ) * ρ ^ 2
 end
 
 function pressure_delta( ρ, r_cut )
     """Calculates correction for Lennard-Jones pressure due to discontinuity in the potential at r_cut."""
     # density, r_cut, and the results, are in LJ units where sigma = 1, epsilon = 1
-    sr3 = 1.0 / r_cut^3 
+    sr3 = 1.0 / r_cut^3
     return π * (8.0/3.0) * ( sr3 ^3  - sr3 ) * ρ ^ 2
 end
 
@@ -215,7 +215,7 @@ end
 """Calculates pressure without tail correction"""
 function Pressure(vir, ρ, T, vol)
 
-    return ρ * T + vir.virial / vol 
+    return ρ * T + vir.virial / vol
 
 end
 
@@ -234,7 +234,7 @@ function _test_Mirror(r, box, rcut)
 end
 """
 
-function LJ_1vN(i::Int, system::Requirements)
+function LJ_ΔU(i::Int, system::Requirements)
 
     # Calculates Lennard-Jones energy of 1 particle, "i", interacting with the
     # other N-1 particles in the system
@@ -242,7 +242,7 @@ function LJ_1vN(i::Int, system::Requirements)
     # input:  i, Requirements (A struct with ϵ, σ, r_cut,, box and r)
     #
     # output  energy, virial both scalars
-    
+
     r = system.r
     ϵ = system.ϵ
     σ = system.σ
@@ -259,25 +259,18 @@ function LJ_1vN(i::Int, system::Requirements)
              diff = @set diff[k] = vector1D(r[i][k], atom[k], box)
         end
 
-        #x = vector1D(atom[1], r[i][1], box)
-        #y = vector1D(atom[2], r[i][2], box)
-        #z = vector1D(atom[3], r[i][3], box)
-         #diff = r[i] - atom #r[j]
-         #diff = diff .- fld(diff./box).*box
-        # rij_sq = dot(diff,diff)
-        #println(x," ", y," ", z)
-
-        #rij_sq = x*x + y*y + z*z
         rij_sq = diff[1]*diff[1] + diff[2]*diff[2] + diff[3]*diff[3]
-         #println(rij_sq," ", rcut_sq)
+
         if  rij_sq > rcut_sq
             pot += 0.0
             vir += 0.0
         else
-
-            if rij_sq < 0.6^2
-                rij_sq = 0.6^2
-            end
+            # possibly needed in the case of random starting config to avoid
+            # numerical overflow from overlapped particles. Not needed
+            # if starting from lattice.
+            #if rij_sq < 0.6^2
+            #    rij_sq = 0.6^2
+            #end
 
             sr2 = σ[j]^2 / rij_sq
             sr6 = sr2 ^ 3
@@ -297,7 +290,7 @@ function potential(system, tot)
     ener, vir = 0.0, 0.0
 
     for i = 1:length(system.r)
-        ener, vir = LJ_1vN(i, system)
+        ener, vir = LJ_ΔU(i, system)
         tot.energy += ener
         tot.virial += vir
     end
@@ -307,19 +300,30 @@ function potential(system, tot)
 
 end
 
-
+"""unit test of lj"""
 function test_LJ()
+    # this tests the LJ potential and indirectly the mirror image Seperation
+    #
+    # the point is to calculate the energy of 1 particle interacting with 
+    # 2 other particles at known positions.
+    # Part 1: tests the case where all particles are within cutoff
+    # Part 2: tests the case where 1 particle is outside cutoff
+    # Part 2: tests mirror image seperation since particle outside cutoff
+    #        has its mirror image inside the cutoff.
+
+    #### Part 1
     box_test = 5.0
     r_cut = box_test / 2
     r = [SVector{3, Float64}(0,0,0),SVector{3, Float64}(0,0,2),SVector{3, Float64}(0,1.5,0)]
     test = Requirements(r, ones(3), ones(3), box_test, r_cut)
-    enn, virr = LJ_1vN(1,test)
+    enn, virr = LJ_ΔU(1,test)
     println("Testing 3 particles (0,0,0), (0,0,2), (0,1.5,0) where rcut is ",r_cut," None are outside of rcut")
     println("Calculated: ", enn, " manual: ", LennardJones(2.0)+LennardJones(1.5) )
 
+    #### Part 2:
     r = [SVector{3, Float64}(0,0,0),SVector{3, Float64}(0,0,4),SVector{3, Float64}(0,1.5,0)]
     test = Requirements(r, ones(3), ones(3), box_test, r_cut)
-    enn, virr = LJ_1vN(1,test)
+    enn, virr = LJ_ΔU(1,test)
     lj1 = LennardJones(4.0)+LennardJones(1.5)
     lj2 = LennardJones(1.0)+LennardJones(1.5)
     println("Testing 3 particles (0,0,0), (0,0,4), (0,1.5,0) where rcut is ",r_cut,"  One  is outside of rcut")
@@ -337,12 +341,80 @@ function LennardJones(rij)
 end
 test_LJ()
 
+""" returns max and min values in an array of SVectors"""
+function maxmin(array::Vector)
+    maxVal = maximum(array[1])
+    minVal = minimum(array[1])
 
+    for svector in array
+        if maximum(svector) > maxVal maxVal = maximum(svector) end
+        if minimum(svector) < minVal minVal = minimum(svector) end
+    end
+
+    return minVal, maxVal
+end
+
+for blk = 1:nblock
+    for step =1:nSteps
+        for i = 1:nAtoms
+
+            partial_old_e, partial_old_v = LJ_ΔU(i, system)
+            rold = deepcopy(system.r[i])
+            rnew = random_translate_vector(totProps.dr_max, system.r[i], box)
+            system.r[i] = rnew
+            partial_new_e, partial_new_v = LJ_ΔU(i, system)
+
+            delta = partial_new_e - partial_old_e
+
+            if Metropolis(delta/temperature)
+                total.energy += delta
+                total.virial += (partial_new_v - partial_old_v)
+                totProps.numTranAccepted += 1
+                ne = averages.old_e + delta
+                nv = averages.old_v + partial_new_v - partial_old_v
+                averages.energy += ne
+                averages.virial += nv
+                averages.old_e = ne
+                averages.old_v = nv
+            else
+                system.r[i] = rold
+                averages.energy += averages.old_e
+                averages.virial += averages.old_v
+            end
+
+            # for troubleshooting checks that particles are in box
+            minV, maxV = maxmin(system.r)
+            #println(minV, maxV)
+            if minV < 0.0
+                println("Shit, particle is less than 0")
+            end
+            if maxV > box
+                println("Shit, particle is outside box")
+            end
+            
+            totProps.totalStepsTaken += 1
+
+        end # i to nAtoms
+
+
+    end # step to nSteps
+    #PrintPDB(system.r, box, blk, "pdbOutput")
+    println(blk, " ", averages.energy / totProps.totalStepsTaken / nAtoms,
+         " ", totProps.numTranAccepted / totProps.totalStepsTaken,
+         "   ", ρ*temperature + averages.virial / box^3 / totProps.totalStepsTaken, #  Pressure(total, ρ, temperature, box^3),
+         " Pcut: ", pressure_lrc( ρ, system.r_cut ), " Ecorr: ",
+         potential_lrc( ρ, r_cut ), "p delta: ", pressure_delta(ρ,system.r_cut ),
+         " A & T p_c: " , ρ*temperature + averages.virial / box^3 / 
+         totProps.totalStepsTaken + pressure_delta(ρ,system.r_cut ) )
+end # blk to nblock
+
+################################################################################
+#
+#                        Start of Configuration
+#
+################################################################################
 box = (nAtoms / ρ ) ^ (1 / 3)
-dr_max = box / 50
-#r_cut = box / 2
-
-println(nSteps, box, dr_max, r_cut)
+dr_max = box / 30   # at 256 particles, ρ=0.75, T=1.0 this is 48% acceptance
 
 if lowercase(initialConfiguration) == "crystal"
     r = InitCubicGrid(nAtoms,ρ)
@@ -363,51 +435,3 @@ totProps = Properties2(temperature, ρ, Pressure(total, ρ, temperature, box^3),
 
 
 println("TEST ", total.energy, " ", totProps.pressure)
-#tester = system.r[3]
-#println(tester)
-#println(typeof(rand(Float64,3)) )
-#println( typeof(tester  + ( rand(Float64,3) .- 0.5 ).* totProps.dr_max   )  )
-
-for blk = 1:nblock
-    for step =1:nSteps
-        for i = 1:nAtoms
-
-            partial_old_e, partial_old_v = LJ_1vN(i, system)
-            rold = deepcopy(system.r[i])
-            rnew = random_translate_vector(totProps.dr_max, system.r[i], box)
-            system.r[i] = rnew
-            #println(rold, "    ", rnew, "    ", system.r[i] )
-            partial_new_e, partial_new_v = LJ_1vN(i, system)
-
-            delta = partial_new_e - partial_old_e
-            
-            if Metropolis(delta/temperature)
-                total.energy += delta
-                total.virial += (partial_new_v - partial_old_v)
-                totProps.numTranAccepted += 1
-                ne = averages.old_e + delta
-                nv = averages.old_v + partial_new_v - partial_old_v
-                averages.energy += ne
-                averages.virial += nv
-                averages.old_e = ne
-                averages.old_v = nv
-            else
-                system.r[i] = rold
-                averages.energy += averages.old_e
-                averages.virial += averages.old_v
-            end
-            totProps.totalStepsTaken += 1
-
-            #sample
-
-        end # i to nAtoms
-
-
-    end # step to nSteps
-    PrintPDB(system.r, box, blk, "pdbOutput")
-    println(blk, " ", averages.energy / totProps.totalStepsTaken,
-         " ", totProps.numTranAccepted / totProps.totalStepsTaken,
-         "   ", Pressure(total, ρ, temperature, box^3),
-         " Pcut: ", pressure_lrc( ρ, system.r_cut ), "Ecorr: ",
-         potential_lrc( ρ, r_cut )  )
-end # blk to nblock
