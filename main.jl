@@ -343,6 +343,33 @@ function maxmin(array::Vector)
     return minVal, maxVal
 end
 
+################################################################################
+#
+#                        Start of Configuration
+#
+################################################################################
+box = (nAtoms / ρ ) ^ (1 / 3)
+dr_max = box / 30   # at 256 particles, ρ=0.75, T=1.0 this is 48% acceptance
+
+if lowercase(initialConfiguration) == "crystal"
+    r = InitCubicGrid(nAtoms,ρ)
+else
+    r = [SVector{3,Float64}(rand(), rand(), rand()) .* box for i = 1:nAtoms]
+end
+
+PrintPDB(r, box, 1, "pdbOutput")
+ϵ = ones(nAtoms)
+σ = ones(nAtoms)
+
+total     = Properties(0.0, 0.0, 0.0, 0.0)
+system    = Requirements(r, ϵ, σ, box, r_cut)
+total     = potential(system, Properties(0.0,0.0, 0.0, 0.0))
+averages  = Properties(total.energy, total.virial,total.energy, total.virial) # initialize struct with averages
+totProps  = Properties2(temperature, ρ, Pressure(total, ρ, temperature, box^3),
+                            dr_max, 0.0, 0.3, 0, 0)
+
+println("TEST ", total.energy, " ", totProps.pressure)
+
 #""" Main loop of simulation. Sweep over all atoms, then Steps, then Blocks."""
 for blk = 1:nblock
     for step =1:nSteps
@@ -400,29 +427,3 @@ for blk = 1:nblock
          totProps.totalStepsTaken + pressure_delta(ρ,system.r_cut ) )
 end # blk to nblock
 
-################################################################################
-#
-#                        Start of Configuration
-#
-################################################################################
-box = (nAtoms / ρ ) ^ (1 / 3)
-dr_max = box / 30   # at 256 particles, ρ=0.75, T=1.0 this is 48% acceptance
-
-if lowercase(initialConfiguration) == "crystal"
-    r = InitCubicGrid(nAtoms,ρ)
-else
-    r = [SVector{3,Float64}(rand(), rand(), rand()) .* box for i = 1:nAtoms]
-end
-
-PrintPDB(r, box, 1, "pdbOutput")
-ϵ = ones(nAtoms)
-σ = ones(nAtoms)
-
-total     = Properties(0.0, 0.0, 0.0, 0.0)
-system    = Requirements(r, ϵ, σ, box, r_cut)
-total     = potential(system, Properties(0.0,0.0, 0.0, 0.0))
-averages  = Properties(total.energy, total.virial,total.energy, total.virial) # initialize struct with averages
-totProps  = Properties2(temperature, ρ, Pressure(total, ρ, temperature, box^3),
-                            dr_max, 0.0, 0.3, 0, 0)
-
-println("TEST ", total.energy, " ", totProps.pressure)
