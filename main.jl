@@ -15,7 +15,12 @@ import JSON
 
 Random.seed!(11234)
 
-
+################################################################################
+# TODO (BDK) create JSON input file with starting parameters:
+# TODO (BDK) add proper sampling
+# TODO (BDK) Add some timing (~ 30 times faster than numpy)
+# until then, manually enter at top
+################################################################################
 temperature = 1.0 #0.8772  # 1.2996
 ρ = 0.75
 nAtoms = 256
@@ -39,12 +44,8 @@ const e = 1.6021765653e-19     # C
 ϵ₀ *= 1e-9  # C²/(J ⋅ nm)
 ϵ₀ *= 1000   # C²/(kJ ⋅ nm)
 const qq_convert = 138.935458   # kJ mol^-1 nm e^-2 # 1 / (4πϵ₀)
-
 factor2 =  e^2 / ϵ₀ / 4 / pi / kb
-
 conv = e^2 / ϵ₀ * na / 4 / pi
-
-#println(conv)
 
 kb1 = 1.3806488e-23 # J/K
 ϵ₀1 = 8.854187817e-12 # C²/J/m
@@ -57,6 +58,7 @@ defaults = Dict("nblock"=> 10, "nstep"=> 1000, "temperature"=> 1.0, "r_cut"=> 2.
             "natoms"=> 256, "initConfig"=> "crystal", "rho"=>0.75, "ϵ"=> 1.0,
              "σ"=>1.0)
 
+""" Generates .pdb files """
 function PrintPDB(r, box, step=1, filename="pdbOutput")
 
     open(filename * "_" * string(step) * ".pdb", "w") do file
@@ -87,11 +89,11 @@ function InitCubicGrid(n::Int,rho::Real)
 #! Created by Braden Kelly
 #!------------------------------------------------------------------------
 #! Creates an initial configuration
-#!------------------------------------------------------------
+#!------------------------------------------------------------------------
 #! input:  n       number of particles
 #!         rho     density
 #! output: coords  coordinates of n particles
-#!---------------------------------------------------------------------------------------------------
+#!------------------------------------------------------------------------
 
         #! Calculate box length (L)
         L = (n/rho)^(1.0/3.0)
@@ -125,7 +127,6 @@ end #function
 
 function potential_lrc( ρ, r_cut )
     """Calculates long-range correction for Lennard-Jones potential per atom."""
-
     # density, r_cut, and the results, are in LJ units where sigma = 1, epsilon = 1
     sr3 = 1.0 / r_cut^3
     return π * ( (8.0/9.0)  * sr3^3  - (8.0/3.0)  * sr3 ) * ρ
@@ -133,7 +134,6 @@ end
 
 function pressure_lrc( ρ, r_cut )
     """Calculates long-range correction for Lennard-Jones pressure."""
-
     # density, r_cut, and the results, are in LJ units where sigma = 1, epsilon = 1
     sr3 = 1.0 / r_cut ^ 3
     return π * ( (32.0/9.0) * sr3 ^ 3  - (16.0/3.0) * sr3 ) * ρ ^ 2
@@ -187,7 +187,8 @@ end
 
 function random_translate_vector( dr_max::Float64, old::SVector, box::Float64 )
 
-# In dr_max, old
+# In: dr_max, old
+# Out: SVector{3,Float64}
 
   zeta = rand(Float64,3)    # Three uniform random numbers in range (0,1)
   zeta = zeta .- 0.5         #! Now in range (-1,+1)
@@ -207,16 +208,12 @@ function Metropolis(delta)
 end
 """ Calculates pressure including the tail correction"""
 function Pressure(vir, ρ, T, vol, r_cut)
-
     return ρ * T + vir.virial / vol + pressure_lrc( ρ, r_cut )
-
 end
 
 """Calculates pressure without tail correction"""
 function Pressure(vir, ρ, T, vol)
-
     return ρ * T + vir.virial / vol
-
 end
 
 "Vector between two coordinate values, accounting for mirror image seperation"
@@ -228,19 +225,10 @@ end
     end
 end
 
-"""
-function _test_Mirror(r, box, rcut)
-    continue
-end
-"""
-
 function LJ_ΔU(i::Int, system::Requirements)
-
     # Calculates Lennard-Jones energy of 1 particle, "i", interacting with the
     # other N-1 particles in the system
-
-    # input:  i, Requirements (A struct with ϵ, σ, r_cut,, box and r)
-    #
+    # input:  i, Requirements (A struct with ϵ, σ, r_cut,, box and r)    #
     # output  energy, virial both scalars
 
     r = system.r
@@ -284,6 +272,7 @@ function LJ_ΔU(i::Int, system::Requirements)
     return pot * 4.0, vir * 24.0 / 3.0
 end
 
+""" Calculates total potential energy of the system. Double Counts. """
 function potential(system, tot)
 
     #tot = Properties(0.0,0.0)
@@ -304,7 +293,7 @@ end
 function test_LJ()
     # this tests the LJ potential and indirectly the mirror image Seperation
     #
-    # the point is to calculate the energy of 1 particle interacting with 
+    # the point is to calculate the energy of 1 particle interacting with
     # 2 other particles at known positions.
     # Part 1: tests the case where all particles are within cutoff
     # Part 2: tests the case where 1 particle is outside cutoff
@@ -354,6 +343,7 @@ function maxmin(array::Vector)
     return minVal, maxVal
 end
 
+#""" Main loop of simulation. Sweep over all atoms, then Steps, then Blocks."""
 for blk = 1:nblock
     for step =1:nSteps
         for i = 1:nAtoms
@@ -391,7 +381,7 @@ for blk = 1:nblock
             if maxV > box
                 println("Shit, particle is outside box")
             end
-            
+
             totProps.totalStepsTaken += 1
 
         end # i to nAtoms
@@ -399,12 +389,14 @@ for blk = 1:nblock
 
     end # step to nSteps
     #PrintPDB(system.r, box, blk, "pdbOutput")
+    # Hella ugly output
+    # TODO (BDK) modify to formatted output
     println(blk, " ", averages.energy / totProps.totalStepsTaken / nAtoms,
          " ", totProps.numTranAccepted / totProps.totalStepsTaken,
          "   ", ρ*temperature + averages.virial / box^3 / totProps.totalStepsTaken, #  Pressure(total, ρ, temperature, box^3),
          " Pcut: ", pressure_lrc( ρ, system.r_cut ), " Ecorr: ",
          potential_lrc( ρ, r_cut ), "p delta: ", pressure_delta(ρ,system.r_cut ),
-         " A & T p_c: " , ρ*temperature + averages.virial / box^3 / 
+         " A & T p_c: " , ρ*temperature + averages.virial / box^3 /
          totProps.totalStepsTaken + pressure_delta(ρ,system.r_cut ) )
 end # blk to nblock
 
@@ -426,12 +418,11 @@ PrintPDB(r, box, 1, "pdbOutput")
 ϵ = ones(nAtoms)
 σ = ones(nAtoms)
 
-total           = Properties(0.0, 0.0, 0.0, 0.0)
-system          = Requirements(r, ϵ, σ, box, r_cut)
-total           = potential(system, Properties(0.0,0.0, 0.0, 0.0))
-averages        = Properties(total.energy, total.virial,total.energy, total.virial) # initialize struct with averages
-totProps = Properties2(temperature, ρ, Pressure(total, ρ, temperature, box^3),
+total     = Properties(0.0, 0.0, 0.0, 0.0)
+system    = Requirements(r, ϵ, σ, box, r_cut)
+total     = potential(system, Properties(0.0,0.0, 0.0, 0.0))
+averages  = Properties(total.energy, total.virial,total.energy, total.virial) # initialize struct with averages
+totProps  = Properties2(temperature, ρ, Pressure(total, ρ, temperature, box^3),
                             dr_max, 0.0, 0.3, 0, 0)
-
 
 println("TEST ", total.energy, " ", totProps.pressure)
