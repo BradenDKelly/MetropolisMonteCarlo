@@ -21,9 +21,9 @@ Random.seed!(11234)
 # TODO (BDK) Add some timing (~ 30 times faster than numpy)
 # until then, manually enter at top
 ################################################################################
-temperature = 1.0 #0.8772  # 1.2996
+temperature = 1.2996 #0.8772  # 1.2996
 ρ = 0.75
-nAtoms = 256
+nAtoms = 2
 #ϵ = 1.0
 #σ = 1.0
 r_cut = 2.5  # box / 2
@@ -31,6 +31,58 @@ nSteps = 1000
 nblock = 100
 outputInterval = 100
 initialConfiguration = "crystal"  # place atoms in a crystal structure
+
+################################################################################
+#
+# ! Bond vectors in body-fixed frame (na and db are public)
+# ! Isosceles triangle, 3 sites, with unit bond length and bond angle alpha, which we set to 75 degrees here
+
+alpha = 75.0 * π / 180.0
+alpha2 = alpha / 2.0
+at_per_mol = 3
+"""
+ REAL, DIMENSION(3,na), PARAMETER, PUBLIC :: db = RESHAPE ( [ &
+      & -SIN(alpha2), 0.0,    -COS(alpha2)/3.0, &
+      &  0.0,         0.0, 2.0*COS(alpha2)/3.0, &
+      &  SIN(alpha2), 0.0,    -COS(alpha2)/3.0 ], [3,na] )
+"""
+db = reshape([-sin(alpha2), 0.0 , -cos(alpha2)/3.0 ,
+              0.0,          0.0 , 2*cos(alpha2)/3.0,
+              sin(alpha2),  0.0 , -cos(alpha2)/3.0],3,at_per_mol)
+
+println(db[:,1])
+
+"""Returns the Fortran equivalent of the same name"""
+function MATMUL(ai,db)
+    # In: ai:3x3 SMatrix
+    #     db: 3x1 vector
+    # Out: SVector{3}
+    return SVector(dot(db,ai[:,1]),dot(db,ai[:,2]),dot(db,ai[:,3]) )
+end
+
+function test_quaternion(db)
+    println("Here is the fortran matrix for db")
+    println("-0.608761489       0.00000000      0.608761489")
+    println("0.00000000       0.00000000       0.00000000" )
+    println("-0.264451116      0.528902233     -0.264451116 ")
+    println("Here is the Julia matrix for db")
+    println(db[1,:])
+    println(db[2,:])
+    println(db[3,:])
+    println("Testing Quaternion MATMUL")
+    println("Testing MATMUL(mat_a,mat_b) as per fortran")
+    println("Calculated in Fortran as MATMUL(db(:,1),db)")
+    answer = [0.440524936,-0.139868781, -0.300656140 ]
+
+    #di(:,a) = MATMUL ( db(:,a), ai ) # NB: equivalent to ai_T*db, ai_T=transpose of ai
+    println("Method 1: transpose(db) * db[:,1]              ", transpose(db) * db[:,1])
+    println("Method 2: db * db[:,1]                         ", db * db[:,1])
+    println("Method 3: manual dot prod db[:,1] with db[:,j] ", MATMUL(db[:,1],db))
+    println("the answer as per Fortran is:                  ", answer)
+end
+#test_quaternion(db)
+
+################################################################################
 
 # Units
 const na = 6.02214129e23      # mol^-1
@@ -124,6 +176,162 @@ function InitCubicGrid(n::Int,rho::Real)
         end
     return [SVector{3}(coords[1,i],coords[2,i],coords[3,i]) for i = 1:size(coords,2)]
 end #function
+
+function q_to_a( q )
+
+  # INTENT(out) DIMENSION(3,3) :: a ! Returns a 3x3 rotation matrix calculated from
+  # INTENT(in) :: q ! supplied quaternion
+  # The rows of the rotation matrix correspond to unit vectors of the molecule in the space-fixed frame
+  # The third row  a(3,:) is "the" axis of the molecule, for uniaxial molecules
+  # Use a to convert space-fixed to body-fixed axes thus: db = matmul(a,ds)
+  # Use transpose of a to convert body-fixed to space-fixed axes thus: ds = matmul(db,a)
+  # The supplied quaternion should be normalized and we check for this
+  tol = 1.e-6
+  norm = dot(q,q) # Quaternion squared length
+  if  abs( norm - 1.0 ) > tol
+     print( "quaternion normalization error ", norm, " ", tol)
+     exit()
+ end
+  # Write out row by row, for clarity
+  #a[1,:] = [ q[0]^2+q[1]^2-q[2]^2-q[3]^2,   2*(q[1]*q[2]+q[0]*q[3]),       2*(q[1]*q[3]-q[0]*q[2])     ] # 1st row
+  #a[2,:] = [     2*(q[1]*q[2]-q[0]*q[3]),   q[0]^2-q[1]^2+q[2]^2-q[3]^2,   2*(q[2]*q[3]+q[0]*q[1])     ] # 2nd row
+  #a[3,:] = [     2*(q[1]*q[3]+q[0]*q[2]),       2*(q[2]*q[3]-q[0]*q[1]),   q[0]^2-q[1]^2-q[2]^2+q[3]^2 ] # 3rd row
+
+  #a = SMatrix{3,3}(q[1]^2+q[2]^2-q[3]^2-q[4]^2, 2*(q[2]*q[3]-q[1]*q[3]), 2*(q[2]*q[3]+q[1]*q[3]),
+  #             2*(q[2]*q[3]+q[1]*q[3]),q[1]^2-q[2]^2+q[3]^2-q[3]^2, 2*(q[3]*q[3]-q[1]*q[2]),
+  #             2*(q[2]*q[3]-q[1]*q[3]), 2*(q[3]*q[3]+q[1]*q[2]), q[1]^2-q[2]^2-q[3]^2+q[3]^2)
+
+ a = SMatrix{3,3}([ q[1]^2+q[2]^2-q[3]^2-q[4]^2   2*(q[2]*q[3]+q[1]*q[4])       2*(q[2]*q[4]-q[1]*q[3])   ; # 1st row
+               2*(q[2]*q[3]-q[1]*q[4])          q[1]^2-q[2]^2+q[3]^2-q[4]^2   2*(q[2]*q[4]+q[1]*q[2])     ; # 2nd row
+               2*(q[2]*q[4]+q[1]*q[3])          2*(q[3]*q[4]-q[1]*q[2])   q[1]^2-q[2]^2-q[3]^2+q[4]^2 ]) # 3rd row
+  return a
+end #q_to_a
+
+function random_vector()
+
+  #REAL, DIMENSION(3) :: e ! Returns a uniformly sampled unit vector
+
+  # The vector is chosen uniformly within the cube surrounding the unit sphere
+  # Vectors lying outside the unit sphere are rejected
+  # Having found a vector within the unit sphere, it is normalized
+  #! Essentially the same routine will work in 2d, or for quaternions in 4d
+
+  #REAL :: norm
+
+  while true# Loop until within unit sphere
+     e = rand(Float64,3) # 3 random numbers uniformly sampled in range (0,1)
+     e    = 2.0 * e - 1.0     # Now in range (-1,+1) i.e. within containing cube
+     norm = sum( e^2 )      # Square modulus
+     if norm < 1.0  break end  # Within unit sphere
+  end # End loop until within unit sphere
+
+  e = e / sqrt( norm ) # Normalize
+  return e
+end # random_vector_1
+
+function quatmul( a, b )
+
+    #REAL, DIMENSION(0:3)             :: c    ! Returns quaternion product of
+    #REAL, DIMENSION(0:3), INTENT(in) :: a, b ! two supplied quaternions
+
+    #c(0) = a(0)*b(0) - a(1)*b(1) - a(2)*b(2) - a(3)*b(3)
+    #c(1) = a(1)*b(0) + a(0)*b(1) - a(3)*b(2) + a(2)*b(3)
+    #c(2) = a(2)*b(0) + a(3)*b(1) + a(0)*b(2) - a(1)*b(3)
+    #c(3) = a(3)*b(0) - a(2)*b(1) + a(1)*b(2) + a(0)*b(3)
+
+    c0 = a[0]*b[0] - a[1]*b[1] - a[2]*b[2] - a[3]*b[3]
+    c1 = a[1]*b[0] + a[0]*b[1] - a[3]*b[2] + a[2]*b[3]
+    c2 = a[2]*b[0] + a[3]*b[1] + a[0]*b[2] - a[1]*b[3]
+    c3 = a[3]*b[0] - a[2]*b[1] + a[1]*b[2] + a[0]*b[3]
+    return SVector{Float64,4}(c0, c1, c2, c3)
+end #quatmul
+
+function rotate_quaternion( angle, axis, old )
+  #IMPLICIT NONE
+  #REAL, DIMENSION(0:3)             :: e     ! Returns a quaternion rotated by
+  #REAL,                 INTENT(in) :: angle ! specified rotation angle (in radians) about
+  #REAL, DIMENSION(3),   INTENT(in) :: axis  ! specified rotation axis relative to
+  #REAL, DIMENSION(0:3), INTENT(in) :: old   ! old quaternion
+
+  #! Note that the axis vector should be normalized and we test for this
+  #! In general, the old quaternion need not be normalized, and the same goes for the result
+  #! although in our applications we only ever use unit quaternions (to represent orientations)
+
+  #REAL                 :: norm
+  #REAL, DIMENSION(0:3) :: rot
+  tol = 1.e-6
+  norm = sum( axis^2 ) #! Axis squared length
+  if abs( norm - 1.0 ) > tol
+     print("axis normalization error", norm," ", tol)
+     exit()
+ end
+
+  #! Standard formula for rotation quaternion, using half angles
+  rot[0]   = cos(0.5*angle)
+  rot[1:3] = sin(0.5*angle).* axis
+
+  e = quatmul( rot, old ) # Apply rotation to old quaternion
+  return e
+end # rotate_quaternion
+
+function random_quaternion()
+  #IMPLICIT NONE
+  #REAL, DIMENSION(0:3) :: e ! Returns a uniformly sampled unit quaternion
+
+  #REAL, DIMENSION(2) :: ζ
+  #REAL               :: norm1, norm2, f
+  ζ = zeros(2)
+  norm1 = norm2 = 0.0
+  while true #! Loop until within unit disk
+     ζ = rand(Float64,2) #! Two uniform random numbers between 0 and 1
+     ζ = 2.0 .* ζ  .- 1.0     #! Now each between -1 and 1
+     norm1 = dot(ζ,ζ)       #! Squared magnitude
+     if ( norm1 < 1.0 ) break end     #! Test for within unit disk
+ end #! End loop until within unit disk
+
+  e0 = ζ[1]
+  e1 = ζ[2]
+
+  while true# ! Loop until within unit disk
+     ζ  = rand(Float64,2) #! Two uniform random numbers between 0 and 1
+     ζ  = 2.0 .* ζ  .- 1.0     #! Now each between -1 and 1
+     norm2 = dot(ζ,ζ)       #! Squared magnitude
+     if ( norm2 < 1.0 ) break end   #! Test for within unit disk
+ end #! End loop until within unit disk
+
+  f = sqrt( ( 1.0 - norm1 ) / norm2 )
+  e2 = ζ[1]*f
+  e3 = ζ[2]*f
+
+ return SVector{4, Float64}(e0, e1, e2, e3)
+end # random_quaternion
+
+function random_rotate_quaternion( angle_max, old )
+
+  #REAL, DIMENSION(0:3)             :: e         ! Returns a unit quaternion rotated by a
+  #REAL,                 INTENT(in) :: angle_max ! maximum angle (in radians) relative to
+  #REAL, DIMENSION(0:3), INTENT(in) :: old       ! the old quaternion
+
+  # Note that the reference quaternion should be normalized and we test for this
+
+  #REAL, DIMENSION(3) :: axis
+  #REAL               :: zeta, angle, norm
+  tol = 1.e-6
+  norm = sum( old^2 ) # Old squared length
+  if ( abs( norm - 1.0 ) > tol )
+     print( "old normalization error", norm, tol)
+     exit()
+ end
+
+  axis = random_vector( )               # Choose random unit vector
+  zeta = rand()           # Random number between 0 and 1
+  angle = ( 2.0*zeta - 1.0 ) * angle_max # Uniform random angle in desired range
+
+  e = rotate_quaternion( angle, axis, old ) # General rotation function
+
+  return e
+end # random_rotate_quaternion
+
 
 function potential_lrc( ρ, r_cut )
     """Calculates long-range correction for Lennard-Jones potential per atom."""
@@ -225,6 +433,7 @@ end
     end
 end
 
+""" Calculates LJ potential between particle 'i' and the other N-1 particles"""
 function LJ_ΔU(i::Int, system::Requirements)
     # Calculates Lennard-Jones energy of 1 particle, "i", interacting with the
     # other N-1 particles in the system
@@ -351,18 +560,32 @@ end
 box = (nAtoms / ρ ) ^ (1 / 3)
 dr_max = box / 30   # at 256 particles, ρ=0.75, T=1.0 this is 48% acceptance
 
+# Generate molecular COM coordinates
 if lowercase(initialConfiguration) == "crystal"
-    r = InitCubicGrid(nAtoms,ρ)
+    rm = InitCubicGrid(nAtoms,ρ)
 else
-    r = [SVector{3,Float64}(rand(), rand(), rand()) .* box for i = 1:nAtoms]
+    rm = [SVector{3,Float64}(rand(), rand(), rand()) .* box for i = 1:nAtoms]
 end
 
-PrintPDB(r, box, 1, "pdbOutput")
+# Generate atomic coordinates
+ra = [SVector{3,Float64}(  0.0, 0.0, 0.0) for i = 1:nAtoms]
+ra = []
+for com in rm
+    ei = random_quaternion()
+    ai = q_to_a( ei ) # Rotation matrix for i
+    for a = 1:at_per_mol # Loop over all atoms
+       #di(:,a) = MATMUL ( db(:,a), ai ) # NB: equivalent to ai_T*db, ai_T=transpose of ai
+       push!(ra,SVector( MATMUL(ai , db[:,a]) ))
+    end # End loop over all atoms
+end
+
+
+PrintPDB(ra, box, 1, "pdbOutput")
 ϵ = ones(nAtoms)
 σ = ones(nAtoms)
 
 total     = Properties(0.0, 0.0, 0.0, 0.0)
-system    = Requirements(r, ϵ, σ, box, r_cut)
+system    = Requirements(rm, ra, ϵ, σ, box, r_cut)
 total     = potential(system, Properties(0.0,0.0, 0.0, 0.0))
 averages  = Properties(total.energy, total.virial,total.energy, total.virial) # initialize struct with averages
 totProps  = Properties2(temperature, ρ, Pressure(total, ρ, temperature, box^3),
@@ -424,6 +647,8 @@ for blk = 1:nblock
          " Pcut: ", pressure_lrc( ρ, system.r_cut ), " Ecorr: ",
          potential_lrc( ρ, r_cut ), "p delta: ", pressure_delta(ρ,system.r_cut ),
          " A & T p_c: " , ρ*temperature + averages.virial / box^3 /
-         totProps.totalStepsTaken + pressure_delta(ρ,system.r_cut ) )
+         totProps.totalStepsTaken + pressure_delta(ρ,system.r_cut ),
+         " instant energy: ", total.energy / nAtoms,
+         " instant pressure: ", Pressure(total, ρ, temperature, box^3) +
+         pressure_delta(ρ,system.r_cut ))
 end # blk to nblock
-
