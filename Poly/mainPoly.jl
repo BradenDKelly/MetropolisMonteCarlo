@@ -19,19 +19,22 @@ Random.seed!(11234)
 # TODO (BDK) create JSON input file with starting parameters:
 # TODO (BDK) add proper sampling
 # TODO (BDK) Add some timing (~ 30 times faster than numpy)
+# TODO (BDK) write unit test to make sure atoms and molecules COM match
 # until then, manually enter at top
 ################################################################################
-temperature = 1.2996 #0.8772  # 1.2996
-ρ = 0.32
-nAtoms = 256
+temperature = 1.0 #0.8772  # 1.2996
+ρ = 0.32655
+nMol = 256
+nAtoms = nMol * 3
 #ϵ = 1.0
 #σ = 1.0
 r_cut = 2.5  # box / 2
-nSteps = 10
-nblock = 10
+nSteps = 1000
+nblock = 100
 outputInterval = 100
 initialConfiguration = "crystal"  # place atoms in a crystal structure
 dϕ_max = 0.05
+dr_max = 0.05
 
 ################################################################################
 #
@@ -272,11 +275,7 @@ function rotate_quaternion( angle, axis, old )
   rot[2:4] = sin(0.5*angle).* axis
 
   e = quatmul( rot, old ) # Apply rotation to old quaternion
-  norm = dot( e, e ) #! Axis squared length
-  if abs( norm - 1.0 ) > tol
-     print("after quatmul normalization error", norm," ", tol)
-     exit()
- end
+
   return e
 end # rotate_quaternion
 
@@ -309,13 +308,6 @@ function random_quaternion()
   e2 = ζ[1]*f
   e3 = ζ[2]*f
   
-  tol = 1.e-6
-  norm = dot([e0, e1, e2, e3], [e0, e1, e2, e3] ) # Old squared length
-  if ( abs( norm - 1.0 ) > tol )
-     print( "SHIT normalization error", norm, tol)
-     exit()
- end
-
  return SVector{4, Float64}(e0, e1, e2, e3)
 end # random_quaternion
 
@@ -341,11 +333,7 @@ function random_rotate_quaternion( angle_max, old )
   angle = ( 2.0*zeta - 1.0 ) * angle_max # Uniform random angle in desired range
 
   e = rotate_quaternion( angle, axis, old ) # General rotation function
-  norm = dot(e,e)
-  if ( abs( norm - 1.0 ) > tol )
-     print( "in random rotate error", norm, tol)
-     exit()
- end
+
   return e
 end # random_rotate_quaternion
 
@@ -472,14 +460,19 @@ function LJ_poly_ΔU(i::Int, system::Requirements)
     rm_cut_box_sq = rm_cut_box^2              # squared
     r_cut_sq      = r_cut^2                   # Potential cutoff squared in sigma=1 units
 
-    ri = system.rm[i]
-    rMol = deleteat!(copy( system.rm),i)
+    ri   = deepcopy(system.rm[i])
+    rMol = deepcopy(system.rm)
+    rMol = deleteat!(rMol,i)
 
-    startAtom = system.thisMol_theseAtoms[i][1]
-    endAtom = system.thisMol_theseAtoms[i][2]
+    startAtom = deepcopy(system.thisMol_theseAtoms[i][1])
+    endAtom   = deepcopy(system.thisMol_theseAtoms[i][2])
+
+    sF = deepcopy(system.thisMol_theseAtoms)
+    sF = deleteat!(sF,i)
     
-    ra = system.ra[startAtom:endAtom]
-    rb = deleteat!(copy(system.ra),startAtom:endAtom)
+    ra = deepcopy(system.ra[startAtom:endAtom])
+    rb = deepcopy(system.ra)
+    rb = deleteat!(rb,startAtom:endAtom)
     #println(length(system.rm))
     
     ϵ = system.ϵ
@@ -491,7 +484,7 @@ function LJ_poly_ΔU(i::Int, system::Requirements)
 
     pot, vir = 0.0, 0.0
 
-    for rj in rMol
+    for (j,rj) in enumerate(rMol)
 
         @inbounds for k=1:3
              rij = @set rij[k] = vector1D(ri[k], rj[k], box)
@@ -501,8 +494,8 @@ function LJ_poly_ΔU(i::Int, system::Requirements)
 
         if rij_sq < rm_cut_box_sq
 
-            for a = 1:length(ra)
-                for b = 1:length(rb)
+            for a = 1:3
+                for b = sF[j][1]:sF[j][2]
 
                     @inbounds for k=1:3
                          rab = @set rab[k] = vector1D(ra[a][k], rb[b][k], box)
@@ -511,6 +504,7 @@ function LJ_poly_ΔU(i::Int, system::Requirements)
                     rab_sq = rab[1]*rab[1] + rab[2]*rab[2] + rab[3]*rab[3]
 
                     if rab_sq < r_cut_sq
+                        if rab_sq < 0.9^2 rab_sq = 0.9^2 end
                         sr2  = 1.0 / rab_sq
                         rmag = sqrt(rab_sq)
                         sr6  = sr2 ^ 3
@@ -657,14 +651,14 @@ end
 #                        Start of Configuration
 #
 ################################################################################
-box = (nAtoms / ρ ) ^ (1 / 3)
-dr_max = 0.05 #box / 30   # at 256 particles, ρ=0.75, T=1.0 this is 48% acceptance
+box = (nMol / ρ ) ^ (1 / 3)
+ #box / 30   # at 256 particles, ρ=0.75, T=1.0 this is 48% acceptance
 
 # Generate molecular COM coordinates
 if lowercase(initialConfiguration) == "crystal"
-    rm = InitCubicGrid(nAtoms,ρ)
+    rm = InitCubicGrid(nMol,ρ)
 else
-    rm = [SVector{3,Float64}(rand(), rand(), rand()) .* box for i = 1:nAtoms]
+    rm = [SVector{3,Float64}(rand(), rand(), rand()) .* box for i = 1:nMol]
 end
 
 # Generate atomic coordinates
@@ -683,13 +677,13 @@ for com in rm
     ai = q_to_a( ei ) # Rotation matrix for i
     for a = 1:at_per_mol # Loop over all atoms
        #di(:,a) = MATMUL ( db(:,a), ai ) # NB: equivalent to ai_T*db, ai_T=transpose of ai
-       push!(ra,SVector( MATMUL(ai , db[:,a]) ))
+       push!(ra,com + SVector( MATMUL(ai , db[:,a]) ))
     end # End loop over all atoms
     push!(thisMol_thisAtom, SVector(start, finish))
 end
 
 
-PrintPDB(ra, box, 1, "pdbOutput")
+PrintPDB(ra, box, 0, "pdbOutput")
 ϵ = ones(nAtoms)
 σ = ones(nAtoms)
 
@@ -716,14 +710,17 @@ for blk = 1:nblock
             ei = random_rotate_quaternion(totProps.dϕ_max, totProps.quat[i]) #quaternion()
             ai = q_to_a( ei ) # Rotation matrix for i
             ra_new = []
+            
             for a = 1:at_per_mol # Loop over all atoms
-               #di(:,a) = MATMUL ( db(:,a), ai ) # NB: equivalent to ai_T*db, ai_T=transpose of ai
-               push!(ra_new,SVector( MATMUL(ai , db[:,a]) ))
+               push!(ra_new,rnew + SVector( MATMUL(ai , db[:,a]) ))
             end # End loop over all atoms
+            
             system.rm[i] = rnew
+            
             system.ra[
                     system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]
                     ] = ra_new
+                    
             partial_new_e, partial_new_v = LJ_poly_ΔU(i, system)
 
             delta = partial_new_e - partial_old_e
@@ -764,17 +761,17 @@ for blk = 1:nblock
 
 
     end # step to nSteps
-    #PrintPDB(system.r, box, blk, "pdbOutput")
+    PrintPDB(system.ra, box, blk, "pdbOutput")
     # Hella ugly output
     # TODO (BDK) modify to formatted output
-    println(blk, " ", averages.energy / totProps.totalStepsTaken / nAtoms,
-         " ", totProps.numTranAccepted / totProps.totalStepsTaken,
-         "   ", ρ*temperature + averages.virial / box^3 / totProps.totalStepsTaken, #  Pressure(total, ρ, temperature, box^3),
+    println(blk, " Energy: ", averages.energy / totProps.totalStepsTaken / nMol,
+         " Ratio: ", totProps.numTranAccepted / totProps.totalStepsTaken,
+         " Pressure: ", ρ*temperature + averages.virial / box^3 / totProps.totalStepsTaken, #  Pressure(total, ρ, temperature, box^3),
          " Pcut: ", pressure_lrc( ρ, system.r_cut ), " Ecorr: ",
          potential_lrc( ρ, r_cut ), "p delta: ", pressure_delta(ρ,system.r_cut ),
          " A & T p_c: " , ρ*temperature + averages.virial / box^3 /
          totProps.totalStepsTaken + pressure_delta(ρ,system.r_cut ),
-         " instant energy: ", total.energy / nAtoms,
+         " instant energy: ", total.energy / nMol,
          " instant pressure: ", Pressure(total, ρ, temperature, box^3) +
          pressure_delta(ρ,system.r_cut ))
 end # blk to nblock
