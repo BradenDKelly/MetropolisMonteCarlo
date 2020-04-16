@@ -26,7 +26,7 @@ println(Dates.now())
 # until then, manually enter at top
 ################################################################################
 temperature = 0.6 #0.8772  # 1.2996
-ρ = 0.1832655
+ρ = 0.30533
 nMol = 256
 nAtoms = nMol * 3
 #ϵ = 1.0
@@ -35,7 +35,7 @@ r_cut = 2.5  # box / 2
 nSteps = 20000
 nblock = 10
 outputInterval = 100
-initialConfiguration = "cnf"  # place atoms in a crystal structure
+initialConfiguration = "crystal"  # place atoms in a crystal structure
 dϕ_max = 0.05
 dr_max = 0.05
 
@@ -910,9 +910,9 @@ All Molecules. Can do this loop Y times. """
 function EnergyMinimize(thisSystem::Requirements,db, quatVec::Vector)
     sys = deepcopy(thisSystem)
     qV = deepcopy(quatVec)
-    nLoops = 100
+    nLoops = 500
     nMols = length(sys.rm)
-    nTrials = 10
+    nTrials = 15
     ra = [SVector(0.,0.,0.) for i=1:3]
     @inbounds for i=1:nLoops
         for j=1:nMols
@@ -936,13 +936,14 @@ function EnergyMinimize(thisSystem::Requirements,db, quatVec::Vector)
         println("loop: ", i)
     end
 
-    return qV
+    return deepcopy(qV)
 
 end
 totProps  = Properties2(temperature, ρ, Pressure(total, ρ, temperature, box^3),
                             dr_max, dϕ_max, 0.3, 0, 0, initQuaternions)
 
-# totProps.quat = @time EnergyMinimize(system,db, totProps.quat)
+totProps.quat = @time EnergyMinimize(system,db, totProps.quat)
+initQuaternions = totProps.quat
 
 for (i,com) in enumerate(system.rm)
 
@@ -1198,8 +1199,10 @@ difference =  finish - start
 
 println("start: ", start)
 println("finish: ", finish)
-println("difference: Seconds: ", difference)
-
+#println("difference: Seconds: ", difference)
+println("Total runtime was: ", Dates.canonicalize(Dates.CompoundPeriod(difference) ) )
+#Dates.format(DateTime("2017-10-01T01:02:03"), "H:M:S.s"
+#Dates.canonicalize(Dates.CompoundPeriod(t2-t1))
 """
 println("difference: Seconds: ", parse(Float64,split(difference)[1]) / 1000)
 println("difference: Minutes: ", parse(Float64,split(difference)[1]) / 1000 / 60)
