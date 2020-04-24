@@ -20,9 +20,18 @@ include("boundaries.jl")
 include("energy.jl")
 include("quaternions.jl")
 include("volumeChange.jl")
+include("ewalds.jl")
+include("constants.jl")
+include("banners.jl")
 
+
+function PrintLine(s::String, n::Int64) # handy tool for outputting lines
+    println(repeat(s, n)) # prints n copies of whatever s is.
+end
+
+Logo()
 Random.seed!(11234)
-start=Dates.now()
+start = Dates.now()
 println(Dates.now())
 
 ################################################################################
@@ -33,15 +42,20 @@ println(Dates.now())
 # TODO (BDK) extend to mixtures
 # TODO (BDK) add ewalds (routines written, need to incorporate)
 # TODO (BDK) make tables for parameters
+# TODO (BDK) need arrays for ϵ, σ
+# TODO (BDK) NPT volume change (implement NPT in general)
+# TODO (BDK) Implement REMC
+# TODO (BDK) Make benchmarks - print out configurations and associated properties
 # until then, manually enter at top
 # TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
-# Things to organize for EWALD 
+# Things to organize for EWALD
 # 1) prefactor: need k-vectors - this needs prep (code written already)
 # 2) need array for charges, their coords, atomID, molID, k-fac max, alpha
 # 3) need real, recipricol, self and tinfoil boundary routines (code already written)
-# 4) test vs. NIST SPC/E database:
+# 4) need to read in NIST database format for testing
+# 5) test vs. NIST SPC/E database:
 #   https://www.nist.gov/mml/csd/chemical-informatics-research-group/spce-water-reference-calculations-10a-cutoff
-# 5) DOUBLE CHECK ALL FREAKING UNITS!!!
+# 6) DOUBLE CHECK ALL FREAKING UNITS!!!
 ################################################################################
 temperature = 0.6 #0.8772  # 1.2996
 ρ = 0.30533
@@ -49,77 +63,165 @@ nMol = 256 * 4
 nAtoms = nMol * 3
 #ϵ = 1.0
 #σ = 1.0
-r_cut = 2.5  # box / 2
+r_cut = 10 #2.5  # box / 2
 nSteps = 2000
 nblock = 100
 outputInterval = 100
-initialConfiguration = "cnf"  # place atoms in a crystal structure
+initialConfiguration = "nist"  # place atoms in a crystal structure
 dϕ_max = 0.05
 dr_max = 0.05
 
 # Set default values, check keys and typecheck values
-defaults = Dict("nblock"=> 10, "nstep"=> 1000, "temperature"=> 1.0, "r_cut"=> 2.5, "dr_max"=> 0.15,
-            "natoms"=> 256, "initConfig"=> "crystal", "rho"=>0.75, "ϵ"=> 1.0,
-             "σ"=>1.0)
+defaults = Dict(
+    "nblock" => 10,
+    "nstep" => 1000,
+    "temperature" => 1.0,
+    "r_cut" => 2.5,
+    "dr_max" => 0.15,
+    "natoms" => 256,
+    "initConfig" => "crystal",
+    "rho" => 0.75,
+    "ϵ" => 1.0,
+    "σ" => 1.0,
+)
 
 ################################################################################
 #
 #                        Start of Configuration
 #
 ################################################################################
-box = (nMol / ρ ) ^ (1 / 3)
- #box / 30   # at 256 particles, ρ=0.75, T=1.0 this is 48% acceptance
+box = (nMol / ρ)^(1 / 3)
+#box / 30   # at 256 particles, ρ=0.75, T=1.0 this is 48% acceptance
 
 # Generate molecular COM coordinates
 if lowercase(initialConfiguration) == "crystal"
-    rm = InitCubicGrid(nMol,ρ)
-elseif occursin(lowercase(initialConfiguration),"cnf") #"cnf"  lowercase(initialConfiguration)
+    rm = InitCubicGrid(nMol, ρ)
+elseif occursin(lowercase(initialConfiguration), "cnf") #"cnf"  lowercase(initialConfiguration)
     rm, quat, box = ReadCNF("cnf_input.inp")
     nMol = length(rm)
     nAtoms = nMol * 3
-    ρ = nMol / (box ^ 3)
+    ρ = nMol / (box^3)
     println(" Initial configuration is from file: cnf_input.inp")
     println("boxsize is: ", box)
     println("density is: ", ρ)
-    sleep(3)
 
     """
     A&T use a box centered at [0,0,0] whereas we use a box from 0->box in all
     dimensions. This next part shift all coordinates by the magnitude of the
     smallest coordinate so all coordinates are not between 0->box
     """
-    xl=yl=zl=0.0
-    for (i,mol) in enumerate(rm)
-        global xl,yl,zl
+    xl = yl = zl = 0.0
+    for (i, mol) in enumerate(rm)
+        global xl, yl, zl
         if i == 1
             xl = mol[1]
             yl = mol[2]
             zl = mol[3]
         else
-            if mol[1] < xl xl = mol[1] end
-            if mol[2] < yl yl = mol[2] end
-            if mol[3] < zl zl = mol[3] end
+            if mol[1] < xl
+                xl = mol[1]
+            end
+            if mol[2] < yl
+                yl = mol[2]
+            end
+            if mol[3] < zl
+                zl = mol[3]
+            end
         end
     end
     xl = abs(xl)
     yl = abs(yl)
     zl = abs(zl)
-    for (i,mol) in enumerate(rm)
-        rm[i] = mol .+ [xl,yl,zl]
+    for (i, mol) in enumerate(rm)
+        rm[i] = mol .+ [xl, yl, zl]
     end
 
+elseif occursin(lowercase(initialConfiguration), "nist")
+    # THis file stores a single configuration of 100-750 SPC/E water molecules.
+    # This is for testing only. NIST has results for energy contributions.
+    # load the configuration, get the atom types, charges, coordinates.
+    # Return to here and test.
+    filename = "spce_sample_config_periodic1.txt"
+    filename = "coord750.txt"
+    qq_r, qq_q, rm, ra, atomTracker, box, atomName, atomType =
+        ReadNIST(filename)
+
+    # make LJ table of values.
+    σ_O = 0.316555789 * 10.0 # Å
+    σ_H = 0.0 # nm
+    ϵ_O = 78.1974311 # K   (ϵ/kᵦ)
+    ϵ_H = 0.0 # K   (ϵ/kᵦ)
+
+    xl = yl = zl = 0.0
+    for (i, mol) in enumerate(rm)
+        global xl, yl, zl
+        if i == 1
+            xl = mol[1]
+            yl = mol[2]
+            zl = mol[3]
+        else
+            if mol[1] < xl
+                xl = mol[1]
+            end
+            if mol[2] < yl
+                yl = mol[2]
+            end
+            if mol[3] < zl
+                zl = mol[3]
+            end
+        end
+    end
+    xl = abs(xl)
+    yl = abs(yl)
+    zl = abs(zl)
+    for (i, mol) in enumerate(rm)
+        rm[i] = mol .+ [xl, yl, zl]
+    end
+    for (i, part) in enumerate(ra)
+        ra[i] = part .+ [xl, yl, zl]
+        qq_r[i] = part .+ [xl, yl, zl]
+    end
 else
     rm = [SVector{3,Float64}(rand(), rand(), rand()) .* box for i = 1:nMol]
 end
 
+###########################
+#
+#                       Test electrostatics
+#
+########################################
+ewald = EWALD(5.6 / box, 5, 27, 1, factor)  # kappa, nk, k_sq_max, NKVECS
+println("Check initializtion of EWALD on line 162. 5.6 / box?")
+#cfac, kxyz, ewald = PrepareEwaldVariables(ewald, box) # better one
+kfacs, ewald = SetupKVecs(ewald, box)
+println(ewald)
+
+if occursin(lowercase(initialConfiguration), "nist")
+    ϵ = [ϵ_O, ϵ_H]
+    σ = [σ_O, σ_H]
+    molNames = ["Wat" for i = 1:length(rm)]
+    molTypes = [1 for i = 1:length(rm)]
+else
+    ϵ = σ = ones(1, 1)
+end
+"""
+total     = Properties(0.0, 0.0, 0.0, 0.0)
+system    = Requirements(rm, ra, thisMol_thisAtom, Tables(ϵ,σ), box, r_cut)
+total     = potential(system, Properties(0.0,0.0, 0.0, 0.0), ewald,
+                     atomName, atomType, qq_q, qq_r)
+"""
+
+println(ϵ)
+println(σ)
+
 # Generate atomic coordinates
-ra = [SVector{3,Float64}(  0.0, 0.0, 0.0) for i = 1:nAtoms]
-ra = []
+#ra = [SVector{3,Float64}(  0.0, 0.0, 0.0) for i = 1:nAtoms]
+#ra = []
 finish = 0
 thisMol_thisAtom = []
 initQuaternions = []
 
-for (i,com) in enumerate(rm)
+for (i, com) in enumerate(rm)
     global finish
     start = finish + 1
     finish = start + 2
@@ -128,79 +230,137 @@ for (i,com) in enumerate(rm)
     else
         ei = random_quaternion()
     end
-    push!(initQuaternions,ei)
-    ai = q_to_a( ei ) # Rotation matrix for i
+    push!(initQuaternions, ei)
+    ai = q_to_a(ei) # Rotation matrix for i
     for a = 1:at_per_mol # Loop over all atoms
-       #di(:,a) = MATMUL ( db(:,a), ai ) # NB: equivalent to ai_T*db, ai_T=transpose of ai
-       push!(ra,com + SVector( MATMUL(ai , db[:,a]) ))
+        #di(:,a) = MATMUL ( db(:,a), ai ) # NB: equivalent to ai_T*db, ai_T=transpose of ai
+        #push!(ra,com + SVector( MATMUL(ai , db[:,a]) ))
     end # End loop over all atoms
     push!(thisMol_thisAtom, SVector(start, finish))
 end
 
+total = Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+system = Requirements(
+    rm,
+    ra,
+    thisMol_thisAtom,
+    molNames,
+    molTypes,
+    atomName,
+    atomType,
+    Tables(ϵ, σ),
+    box,
+    r_cut,
+)
+total = potential(
+    system,
+    Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    ewald,
+    qq_q,
+    qq_r,
+    kfacs,
+)
 PrintPDB(ra, box, 0, "pdbOutput")
-ϵ = σ = ones(nAtoms)
+#ϵ = σ = ones(1,1)
 
-total     = Properties(0.0, 0.0, 0.0, 0.0)
-system    = Requirements(rm, ra, thisMol_thisAtom, ϵ, σ, box, r_cut)
-totProps  = Properties2(temperature, ρ, Pressure(total, ρ, temperature, box^3),
-                            dr_max, dϕ_max, 0.3, 0, 0, initQuaternions)
+total = Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+system = Requirements(
+    rm,
+    ra,
+    thisMol_thisAtom,
+    molNames,
+    molTypes,
+    atomName,
+    atomType,
+    Tables(ϵ, σ),
+    box,
+    r_cut,
+)
+totProps = Properties2(
+    temperature,
+    ρ,
+    Pressure(total, ρ, temperature, box^3),
+    dr_max,
+    dϕ_max,
+    0.3,
+    0,
+    0,
+    initQuaternions,
+)
 
+println("TEst rcut, press_corr ", system.r_cut, "...........", factor)
+println(ener_corr(system, 2, [750, 2250]))
+println(press_corr(system, 2, [750, 2250]))
+sleep(20)
 """If not using a premade initial configuration, do Energy Minimization"""
 
-if lowercase(initialConfiguration)  == "crystal"
-    totProps.quat = @time EnergyMinimize(system,db, totProps.quat)
+if lowercase(initialConfiguration) == "crystal"
+    totProps.quat = @time EnergyMinimize(system, db, totProps.quat)
     initQuaternions = totProps.quat
 end
 
-for (i,com) in enumerate(system.rm)
-
+for (i, com) in enumerate(system.rm)
     start = system.thisMol_theseAtoms[i][1]
     finish = system.thisMol_theseAtoms[i][2]
-    ai = q_to_a( totProps.quat[i] ) # Rotation matrix for i
+    ai = q_to_a(totProps.quat[i]) # Rotation matrix for i
     j = 0
     for a = start:finish # Loop over all atoms
         j += 1
-       system.ra[a] = com + SVector( MATMUL(ai , db[:,j]) )
+        system.ra[a] = com + SVector(MATMUL(ai, db[:, j]))
     end # End loop over all atoms
 end
 
-total     = potential(system, Properties(0.0,0.0, 0.0, 0.0))
-averages  = Properties(total.energy, total.virial,total.energy, total.virial) # initialize struct with averages
-totProps  = Properties2(temperature, ρ, Pressure(total, ρ, temperature, box^3),
-                            dr_max, dϕ_max, 0.3, 0, 0, initQuaternions)
+total = potential(system, Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+averages = Properties(
+    total.energy,
+    total.virial,
+    0.0,
+    0.0,
+    0.0,
+    total.energy,
+    total.virial,
+) # initialize struct with averages
+totProps = Properties2(
+    temperature,
+    ρ,
+    Pressure(total, ρ, temperature, box^3),
+    dr_max,
+    dϕ_max,
+    0.3,
+    0,
+    0,
+    initQuaternions,
+)
 
 println("TEST ", total.energy, " ", totProps.pressure)
 #""" Main loop of simulation. Sweep over all atoms, then Steps, then Blocks."""
 
 for blk = 1:nblock
-    for step =1:nSteps
+    for step = 1:nSteps
         for i = 1:length(system.rm)
-
             partial_old_e, partial_old_v = LJ_poly_ΔU(i, system)
             rm_old = deepcopy(system.rm[i])
-            ra_old = deepcopy(system.ra[
-                        system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]]
-                                )
+            ra_old =
+                deepcopy(system.ra[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]])
             rnew = random_translate_vector(totProps.dr_max, system.rm[i], box)
             ei = random_rotate_quaternion(totProps.dϕ_max, totProps.quat[i]) #quaternion()
-            ai = q_to_a( ei ) # Rotation matrix for i
+            ai = q_to_a(ei) # Rotation matrix for i
             ra_new = []
 
             for a = 1:at_per_mol # Loop over all atoms
-               push!(ra_new,rnew + SVector( MATMUL(ai , db[:,a]) ))
+                push!(ra_new, rnew + SVector(MATMUL(ai, db[:, a])))
             end # End loop over all atoms
 
             system.rm[i] = rnew
 
-            system.ra[
-                    system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]
-                    ] = ra_new
+            system.ra[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]] =
+                ra_new
 
             partial_new_e, partial_new_v = LJ_poly_ΔU(i, system)
 
             delta = partial_new_e - partial_old_e
 
-            if Metropolis(delta/temperature)
+            if Metropolis(delta / temperature)
                 total.energy += delta
                 total.virial += (partial_new_v - partial_old_v)
                 totProps.numTranAccepted += 1
@@ -213,9 +373,8 @@ for blk = 1:nblock
                 totProps.quat[i] = ei
             else
                 system.rm[i] = rm_old
-                system.ra[
-                        system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]
-                        ] = ra_old
+                system.ra[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]] =
+                    ra_old
                 averages.energy += averages.old_e
                 averages.virial += averages.old_v
             end
@@ -236,34 +395,51 @@ for blk = 1:nblock
 
 
     end # step to nSteps
-    total2     = potential(system, Properties(0.0,0.0, 0.0, 0.0))
+    total2 = potential(system, Properties(0.0, 0.0, 0.0, 0.0))
     if abs(total2.energy - total.energy) > 0.001
         print("SHITTTTTT, things aren't adding up")
     end
     PrintPDB(system.ra, box, blk, "pdbOutput")
     # Hella ugly output
     # TODO (BDK) modify to formatted output
-    println(blk, " Energy: ", averages.energy / totProps.totalStepsTaken / nMol,
-         " Ratio: ", totProps.numTranAccepted / totProps.totalStepsTaken,
-         " Pressure: ", ρ*temperature + averages.virial / box^3 / totProps.totalStepsTaken, #  Pressure(total, ρ, temperature, box^3),
-         " Pcut: ", pressure_lrc( ρ, system.r_cut ), " Ecorr: ",
-         potential_lrc( ρ, r_cut ), "p delta: ", pressure_delta(ρ,system.r_cut ),
-         " A & T p_c: " , ρ*temperature + averages.virial / box^3 /
-         totProps.totalStepsTaken + pressure_delta(ρ,system.r_cut ),
-         " instant energy: ", total.energy / nMol,
-         " instant pressure: ", Pressure(total, ρ, temperature, box^3) +
-         pressure_delta(ρ,system.r_cut ))
-         println("box: ", box, "  density: ", ρ )
+    println(
+        blk,
+        " Energy: ",
+        averages.energy / totProps.totalStepsTaken / nMol,
+        " Ratio: ",
+        totProps.numTranAccepted / totProps.totalStepsTaken,
+        " Pressure: ",
+        ρ * temperature + averages.virial / box^3 / totProps.totalStepsTaken, #  Pressure(total, ρ, temperature, box^3),
+        " Pcut: ",
+        pressure_lrc(ρ, system.r_cut),
+        " Ecorr: ",
+        potential_lrc(ρ, r_cut),
+        "p delta: ",
+        pressure_delta(ρ, system.r_cut),
+        " A & T p_c: ",
+        ρ * temperature +
+        averages.virial / box^3 / totProps.totalStepsTaken +
+        pressure_delta(ρ, system.r_cut),
+        " instant energy: ",
+        total.energy / nMol,
+        " instant pressure: ",
+        Pressure(total, ρ, temperature, box^3) +
+        pressure_delta(ρ, system.r_cut),
+    )
+    println("box: ", box, "  density: ", ρ)
 end # blk to nblock
 
 finish = Dates.now()
-difference =  finish - start
+difference = finish - start
 
 
 println("start: ", start)
 println("finish: ", finish)
 #println("difference: Seconds: ", difference)
-println("Total runtime was: ", Dates.canonicalize(Dates.CompoundPeriod(difference) ) )
+println(
+    "Total runtime was: ",
+    Dates.canonicalize(Dates.CompoundPeriod(difference)),
+)
 #Dates.format(DateTime("2017-10-01T01:02:03"), "H:M:S.s"
 #Dates.canonicalize(Dates.CompoundPeriod(t2-t1))
 """
@@ -271,3 +447,5 @@ println("difference: Seconds: ", parse(Float64,split(difference)[1]) / 1000)
 println("difference: Minutes: ", parse(Float64,split(difference)[1]) / 1000 / 60)
 println("difference: Hours  : ", parse(Float64,split(difference)[1]) / 1000 / 3600)
 """
+
+Completion()
