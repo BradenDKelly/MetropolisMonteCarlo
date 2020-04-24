@@ -6,5 +6,7 @@ While individual functions have been previously tested and passed, I have not th
 
 x (Completed) need to test on fixed configurations provides by NIST for SPC/E water https://www.nist.gov/mml/csd/chemical-informatics-research-group/spce-water-reference-calculations-10a-cutoff 
 
+(need to add NIST SPC/E tests as unit tests that can be routinely called for testing).
+
 Ewalds works fine, need to implement into moves, and test pressure calculation. Wqq = Vqq/3.
 
