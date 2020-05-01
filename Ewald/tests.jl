@@ -5,8 +5,6 @@
 #  2) test_COM  tests that the center-of-mass is calculated accurately
 #
 #  3) test_quaternion tests that quaternions are calculated correctly
-
-
 function test_two_LJ_triangles()
 
  """ two dummy molecules each of 3 atoms, interact via LJ"""
@@ -179,3 +177,16 @@ at_per_mol = 3
 db = reshape([-sin(alpha2), 0.0 , -cos(alpha2)/3.0 ,
               0.0,          0.0 , 2*cos(alpha2)/3.0,
               sin(alpha2),  0.0 , -cos(alpha2)/3.0],3,at_per_mol)
+
+#= Overwriting to spc/e water =#
+alpha = 75.0 * π / 180.0
+alpha2 = alpha / 2.0
+at_per_mol = 3
+db = reshape([0.816, 0.0 , 0.577 ,
+              0.0,  0.0 , 0.0,
+              1.633,  0.0 , 0.0],3,at_per_mol)
+#=
+db = reshape([x1, y1 , z1 ,
+              x2, y2 , z2 ,
+              x3, y3 , z3 ],3,at_per_mol)
+=#

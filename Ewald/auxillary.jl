@@ -69,6 +69,9 @@ end
 mutable struct Requirements
     rm::Vector{SVector{3,Float64}}
     ra::Vector{SVector{3,Float64}}
+    nMols::Int
+    nAtoms::Int
+    nCharges::Int
     thisMol_theseAtoms::Vector{SVector{2,Int64}}
     molNames::Vector     # strings
     molTypes::Vector     # integers
@@ -146,7 +149,7 @@ function maxmin(array::Vector)
 end
 
 """Returns the center of mass of an array of atoms and array of masses"""
-function COM(atoms, masses)
+function COM(atoms::Vector, masses)
     totalMass = sum(masses)
     numerator = sum(atoms .* masses)
     #println("From inside COM: ", numerator ./ totalMass)

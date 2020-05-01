@@ -282,7 +282,7 @@ function potential(
     ewalds::EWALD,
     qq_q::Vector,
     qq_r::Vector,
-    kfacs::Vector,
+    #kfacs::Vector,
 )
 
     #tot = Properties(0.0,0.0)
@@ -290,7 +290,8 @@ function potential(
     r_cut = system.r_cut
     box = system.box
     thisMol_thisAtom = system.thisMol_theseAtoms
-
+    total.energy = 0.0
+    total.virial = 0.0
     #########
     #
     #     Calculate LJ
@@ -324,13 +325,15 @@ function potential(
     tot.coulomb += totReal / 2 * ewald.factor
     println("Total real Ewald is: ", totReal / 2 * ewald.factor)
     # Recipricol
-    @time recipEnergy = RecipLong(system, ewald, qq_r, qq_q, kfacs)
-    @time recipEnergy = RecipLong(system, ewald, qq_r, qq_q, kfacs)
-    println("Total recipricol Ewald is: ", recipEnergy * ewald.factor)
-    tot.energy += recipEnergy * ewald.factor
-    tot.coulomb += recipEnergy * ewald.factor
-    tot.recipOld = recipEnergy * ewald.factor
-    tot.recip = recipEnergy * ewald.factor
+    @time recipEnergy = RecipLong(system, ewald, qq_r, qq_q) * ewald.factor #RecipLong(system, ewald, qq_r, qq_q, kfacs)
+    @time recipEnergy = RecipLong(system, ewald, qq_r, qq_q) * ewald.factor #RecipLong(system, ewald, qq_r, qq_q, kfacs)
+    #@btime RecipLong(system, ewald, qq_r, qq_q) * ewald.factor
+    println("first: ", recipEnergy)
+    println("Total recipricol Ewald is: ", recipEnergy)
+    tot.energy += recipEnergy #* ewald.factor
+    tot.coulomb += recipEnergy #* ewald.factor
+    tot.recipOld = recipEnergy #* ewald.factor
+    tot.recip = recipEnergy #* ewald.factor
     # Self
 
     println("Self energy: ", EwaldSelf(ewald, qq_q))
@@ -346,17 +349,22 @@ end
 
 """Rotate each molecule X times, save the lowest energy rotation. Loop Through
 All Molecules. Can do this loop Y times. """
-function EnergyMinimize(thisSystem::Requirements, db, quatVec::Vector)
+function EnergyMinimize(thisSystem::Requirements, db, quatVec::Vector, qq_q, qq_r, ewald::EWALD)
     sys = deepcopy(thisSystem)
     qV = deepcopy(quatVec)
-    nLoops = 500
+    nLoops = 5
     nMols = length(sys.rm)
-    nTrials = 15
+    nTrials = 3
     ra = [SVector(0.0, 0.0, 0.0) for i = 1:3]
+    println("EnergyMinimize in energy.jl, line 360, has some hardcoding")
     @inbounds for i = 1:nLoops
         for j = 1:nMols
             com = sys.rm[j]
             lowE, lowV = LJ_poly_ΔU(j, sys)
+            partial_ewald_e, partial_ewald_v = EwaldShort(
+                j, system,ewald, temperature, box, qq_r, qq_q, false )
+            lowE += partial_ewald_e
+            lowV += partial_ewald_v
             savedQuat = qV[j]
             for k = 1:nTrials
                 ei = random_rotate_quaternion(0.05, savedQuat)
@@ -366,7 +374,13 @@ function EnergyMinimize(thisSystem::Requirements, db, quatVec::Vector)
                 end # End loop over all atoms
                 sys.ra[sys.thisMol_theseAtoms[j][1]:sys.thisMol_theseAtoms[j][2]] =
                     ra
+                qq_r[sys.thisMol_theseAtoms[j][1]:sys.thisMol_theseAtoms[j][2]] =
+                        ra
                 newE, newV = LJ_poly_ΔU(j, sys)
+                partial_ewald_e, partial_ewald_v = EwaldShort(
+                    j, system,ewald, temperature, box, qq_r, qq_q, false )
+                newE += partial_ewald_e
+                newV += partial_ewald_v
                 if newE < lowE
                     savedQuat = ei
                 end
@@ -457,7 +471,7 @@ function ener_corr(system::Requirements, num_atom_types = 2, b = [100, 200])
     coru = 0.0
     Rc = system.r_cut
     vol = system.box^3
-    println(system.table.ϵᵢⱼ)
+    #println(system.table.ϵᵢⱼ)
     for i = 1:num_atom_types # cycle through all of the atoms, this counts as being atom 1, cycle "k" is atom 2
 
         for j = 1:num_atom_types #for each atom, we must cycle through all of the molecules it interacts with

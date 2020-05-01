@@ -81,7 +81,7 @@ function PrintPDB(r, box, step = 1, filename = "pdbOutput")
             line = @sprintf(
                 "%-6s %4d %3s %4s %5d %3s %7.3f %7.3f %7.3f %5.2f %5.2f \n",
                 "ATOM",
-                i,
+                mol, #i,
                 atomName,
                 molName,
                 mol,
@@ -103,6 +103,65 @@ function PrintPDB(r, box, step = 1, filename = "pdbOutput")
     end
 end
 
+function PrintOutput(
+    system::Requirements,
+    totProps::Properties2,
+    atomType,
+    atomName,
+    qq_r,
+    qq_q,
+    box,
+    step = 1,
+    filename = "xyz_quat",
+)
+
+    open(filename * "_" * string(step) * ".pdb", "w") do file
+
+        line = @sprintf(
+            "%-7s %7.3f %7.3f %7.3f\n",
+            "Output",
+            box,
+            box,
+            box,
+        )
+        write(file, line)
+        write(file, " Molecular coordinates and quaternions\n")
+        write(file, " #, mol name, atom Start, atom End, x, y, z, q0, q1, q2, q3\n")
+        for i=1:length(system.rm)
+            line = @sprintf(
+                "%4d %-7s %4d %4d %7.3f %7.3f %7.3f %7.3f %7.3f %7.3f %7.3f\n",
+                i,
+                system.molNames[i],
+                system.thisMol_theseAtoms[i][1],
+                system.thisMol_theseAtoms[i][2],
+                system.rm[i][1],
+                system.rm[i][2],
+                system.rm[i][3],
+                totProps.quat[i][1],
+                totProps.quat[i][2],
+                totProps.quat[i][3],
+                totProps.quat[i][4]
+            )
+            write(file, line)
+        end
+        write(file, "Atom coordinates\n")
+        write(file, "#, name, type, charge, x, y, z\n")
+        for i=1:length(system.ra)
+            line = @sprintf(
+                "%4d %-7s %-7s %7.3f %7.3f %7.3f %7.3f \n",
+                i,
+                system.atomNames[i],
+                system.atomTypes[i],
+                qq_q[i],
+                system.ra[i][1],
+                system.ra[i][2],
+                system.ra[i][3]
+            )
+            write(file, line)
+        end
+    end
+end
+
 function ReadCNF(input = "cnf_input.inp")
     r = []
     e = []
@@ -115,7 +174,7 @@ function ReadCNF(input = "cnf_input.inp")
 
             if i == 2 #length(split(line)) == 1  && split(line) != typeof(Flo)
                 box1 = parse(Float64, strip(line)) # 9.42953251 #parse(Float64, split(line)) # this should be on the 2nd Line
-                println("hardcoded box at line 257 in ReadCNF: ", box1)
+                #println("hardcoded box at line 257 in ReadCNF: ", box1)
             end
 
             if i >= 3 #length(split(line)) > 4
