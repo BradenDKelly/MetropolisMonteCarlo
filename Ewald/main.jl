@@ -23,6 +23,7 @@ include("volumeChange.jl")
 include("ewalds.jl")
 include("constants.jl")
 include("banners.jl")
+include("adjust.jl")
 
 
 function PrintLine(s::String, n::Int64) # handy tool for outputting lines
@@ -39,35 +40,23 @@ println(Dates.now())
 # TODO (BDK) add proper sampling
 # TODO (BDK) Add some timing (~ 30 times faster than numpy)
 # TODO (BDK) write more unit tests
-# TODO (BDK) extend to mixtures
-# TODO (BDK) add ewalds (routines written, need to incorporate)
-# TODO (BDK) make tables for parameters
-# TODO (BDK) need arrays for ϵ, σ
 # TODO (BDK) NPT volume change (implement NPT in general)
 # TODO (BDK) Implement REMC
 # TODO (BDK) Make benchmarks - print out configurations and associated properties
-# until then, manually enter at top
-# TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
-# Things to organize for EWALD
-# 1) prefactor: need k-vectors - this needs prep (code written already)
-# 2) need array for charges, their coords, atomID, molID, k-fac max, alpha
-# 3) need real, recipricol, self and tinfoil boundary routines (code already written)
-# 4) need to read in NIST database format for testing
-# 5) test vs. NIST SPC/E database:
-#   https://www.nist.gov/mml/csd/chemical-informatics-research-group/spce-water-reference-calculations-10a-cutoff
-# 6) DOUBLE CHECK ALL FREAKING UNITS!!!
 ################################################################################
 temperature = 298.15 #0.6 #0.8772  # 1.2996
-ρ = 0.00375000533
-nMol = 100 * 3
+ρ = 0.033101144   #0.015047707 #0.003633451 #0.00375000533 0.015047712
+
+nMol = 300 #256 #100 * 10
 nAtoms = nMol * 3
-r_cut = 10 #2.5  # box / 2
-nSteps = 20
-nblock = 100
+r_cut = 10.0 #2.5  # box / 2 Angstrom
+nSteps = 10
+nblock = 200
 outputInterval = 100
 initialConfiguration = "crystal"  # place atoms in a crystal structure
 dϕ_max = 0.05
 dr_max = 0.05
+coulombStyle = "ewald"
 
 # Set default values, check keys and typecheck values
 defaults = Dict(
@@ -90,13 +79,16 @@ defaults = Dict(
 #
 ################################################################################
 box = (nMol / ρ)^(1 / 3)
-dr_max = box * 0.01
+dr_max = 0.316555789 * 10.0 * 0.1
 println("BoxSize: ", box)
 #box / 30   # at 256 particles, ρ=0.75, T=1.0 this is 48% acceptance
-global warnings = []
+warnings = []
 
 # Shift COM of body-fixed reference molecules to [0,0,0]
-push!(warnings, "Overwriting triatomic glass to spce body-fixed. line 184 tests.jl")
+push!(
+    warnings,
+    "Overwriting triatomic glass to spce body-fixed. line 184 tests.jl",
+)
 a = []
 push!(a, SVector(db[:, 1]...))
 push!(a, SVector(db[:, 2]...))
@@ -134,9 +126,9 @@ if lowercase(initialConfiguration) == "crystal"
     ]
     qq_q = [
         if (i - 1) % 3 == 0
-            -0.8436
+            -0.42380 * 2
         else
-            0.4218
+            0.42380
         end for i = 1:nAtoms
     ]
 
@@ -234,7 +226,18 @@ end
 #                       Test electrostatics
 #
 ########################################
-ewald = EWALD(5.6 / box, 5, 27, 1, [SVector{3,Int32}(i, i, i) for i=1:3], [0.0,0.0],factor)  # kappa, nk, k_sq_max, NKVECS
+
+ewald = EWALD(
+    5.6 / box,
+    5,
+    27,
+    1,
+    [SVector{3,Int32}(i, i, i) for i = 1:3],
+    [0.0, 0.0],     # dummy values
+    zeros(ComplexF64, 2),     # dummy values
+    zeros(ComplexF64, 2),
+    factor,
+)  # kappa, nk, k_sq_max, NKVECS
 #ewald = EWALD(5.6 / box, 5, 27, [0.0,0.0],factor)
 println("Check initialization of EWALD on line 162. 5.6 / box?")
 ewald = PrepareEwaldVariables(ewald, box) # better one # cfac, kxyz,
@@ -253,7 +256,7 @@ end
 
 if occursin(lowercase(initialConfiguration), "cnf") ||
    occursin(lowercase(initialConfiguration), "crystal")
-   ra = []
+    ra = []
 end
 thisMol_thisAtom = []
 initQuaternions = []
@@ -275,16 +278,20 @@ for (i, com) in enumerate(rm)
         ai = q_to_a(ei) # Rotation matrix for i
         for a = 1:at_per_mol # Loop over all atoms
             # di(:,a) = MATMUL ( db(:,a), ai ) # NB: equivalent to ai_T*db, ai_T=transpose of ai
-            push!(ra, SVector( [com + SVector(MATMUL(ai, db[:, a]) )]... )
+            push!(ra, com + SVector(MATMUL(ai, db[:, a])))
         end # End loop over all atoms
     end
     push!(thisMol_thisAtom, SVector(start, finish))
 end
+ra = [SVector(ra[i]...) for i = 1:length(ra)]
+#qq_r::Vector{SVector{3,Float64}}
 qq_r = ra  # this assumes charges are atom centered
 
 # TODO add qq_q and qq_r to system::Requirements
 
+# check that simulation box is charge neutral
 @assert sum(qq_q) == 0.0
+
 PrintPDB(ra, box, 0, "pdbOutput")
 total = Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 system = Requirements(
@@ -316,19 +323,21 @@ totProps = Properties2(
     initQuaternions,
 )
 
+trans_moves = Moves(0,0,0,0,0.5, dr_max)
+
 println("TEst rcut, press_corr ", system.r_cut, "...........", factor)
 println(ener_corr(system, 2, [system.nMols, system.nAtoms]))
 println(press_corr(system, 2, [system.nMols, system.nAtoms]))
 #sleep(20)
 """If not using a premade initial configuration, do Energy Minimization"""
-
+#=
 if lowercase(initialConfiguration) == "crystal"
     totProps.quat = @time EnergyMinimize(system, db, totProps.quat,qq_q, qq_r, ewald)
     initQuaternions = totProps.quat
 else
     totProps.quat = initQuaternions
 end
-
+=#
 #=
 for (i, com) in enumerate(system.rm)
     start = system.thisMol_theseAtoms[i][1]
@@ -341,15 +350,27 @@ for (i, com) in enumerate(system.rm)
     end # End loop over all atoms
 end
 =#
-
-total = potential(
-    system,
-    Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-    ewald,
-    qq_q,
-    qq_r,
-    #kfacs,
-)
+LJ, reall, recipEnergy = 0.0, 0.0, 0.0
+if coulombStyle == "bare"
+    total, LJ, reall = potential(
+        system,
+        Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        ewald,
+        qq_q,
+        qq_r,
+        "bare"
+    )
+else
+    total, LJ, reall, recipEnergy = potential(
+        system,
+        Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        ewald,
+        qq_q,
+        qq_r,
+        #kfacs,
+    )
+end
+initial = total.energy
 averages = Properties(
     total.energy,
     total.virial,
@@ -398,7 +419,7 @@ PrintOutput(
    qq_q[system.thisMol_theseAtoms[1][1]:system.thisMol_theseAtoms[1][2]]
    )
 =#
-
+#=
 @code_warntype EwaldReal(
         qq_r,
         qq_q,
@@ -408,190 +429,257 @@ PrintOutput(
         2,
         system.r_cut,
     )
-
+=#
+#@code_warntype EwaldReal(qq_r, qq_q, ewald.kappa, box, thisMol_thisAtom, 2, system)
 #total.recipOld = RecipLong(system, ewald, qq_r, qq_q) * ewald.factor
 #total.recipOld = RecipLong(system, ewald, qq_r, qq_q, ewald.cfac) * ewald.factor
-for blk = 1:nblock
-    @time for step = 1:nSteps
-        for i = 1:length(system.rm)
-            partial_old_e, partial_old_v = LJ_poly_ΔU(i, system)
+ovr_count = 0
 
-            # calculates all short range ewald energies
-            partial_ewald_e, partial_ewald_v = EwaldShort(
-                i,
-                system,
-                ewald,
-                temperature,
-                box,
-                qq_r,
-                qq_q,
-                false,
-            )
-            partial_old_e += partial_ewald_e #+ total.recipOld
-            partial_old_v += partial_ewald_v #+ total.recipOld / 3.0
+testing = false
 
-            #################################################
-            #
-            #      Move and Rotate a particle
-            #
-            #################################################
+#@code_warntype CoulombReal(qq_r, qq_q, box, 3, system)
+function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
+                qq_q, qq_r, ewald, averages, ρ, atomName, atomType, coulombStyle)
+    for blk = 1:nblock
+        #global ovr_count, trans_moves
+        @time for step = 1:nSteps
+            for i = 1:length(system.rm)
+                partial_old_e, partial_old_v = LJ_poly_ΔU(i, system)
+                LLJ1 = partial_old_e
+                # calculates all short range ewald energies
+                if coulombStyle == "bare"
+                    partial_ewald_e,  overlap1 =
+                        CoulombReal(qq_r, qq_q, box, i, system)
+                else
 
-            rm_old = deepcopy(system.rm[i])
-            ra_old =
-                deepcopy(system.ra[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]])
-
-            ##recipEnergy = RecipLong(system, ewald, ra_old, qq_q[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]], ewald.cfac) * ewald.factor
-            ##partial_old_e += total.recipOld #  recipEnergy
-            ##partial_old_v += total.recipOld / 3.0 #recipEnergy / 3
+                    partial_ewald_e, partial_ewald_v, overlap1 =
+                        EwaldShort(i, system, ewald, box, qq_r, qq_q, false)
+                        partial_old_v += partial_ewald_v #+ total.recipOld / 3.0
+                end
+                reall1 = partial_ewald_e * ewald.factor
+                partial_old_e += partial_ewald_e * ewald.factor #+ total.recipOld
 
 
-
-            rnew = random_translate_vector(totProps.dr_max, system.rm[i], box)
-            ei = random_rotate_quaternion(totProps.dϕ_max, totProps.quat[i]) #quaternion()
-            ai = q_to_a(ei) # Rotation matrix for i
-            ra_new = []
-
-            for a = 1:at_per_mol # Loop over all atoms
-                push!(ra_new, rnew + SVector(MATMUL(ai, db[:, a])))
-            end # End loop over all atoms
-
-            system.rm[i] = rnew
-
-            # Update atom coords
-            system.ra[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]] =
-                ra_new
-            # Update charge coords
-            qq_r[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]] =
-                ra_new
-
-            # Calculate new LJ energy
-            partial_new_e, partial_new_v = LJ_poly_ΔU(i, system)
-
-            partial_ewald_e, partial_ewald_v = EwaldShort(
-                i,
-                system,
-                ewald,
-                temperature,
-                box,
-                qq_r,
-                qq_q,
-                false,
-            )
-            partial_new_e += partial_ewald_e
-            partial_new_v += partial_ewald_v
-
-            # Calculate new recipricol energy
-            # note: this is a total energy, not the energy of i with the system
-            ##recipEnergy =
-                #RecipLong(system, ewald, qq_r, qq_q, kfacs) * ewald.factor
-            ##    RecipLong(system, ewald, qq_r, qq_q) * ewald.factor
-            #recipEnergy = RecipLong(system, ewald, ra_new, qq_q[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]], ewald.cfac) * ewald.factor
-            ##partial_new_e += recipEnergy
-            ##partial_new_v += recipEnergy / 3
-
-             deltaRecip = RecipMove(
-                system,
-                ewald,
-                ra_old,
-                ra_new,
-                qq_q[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]]
+                #=
+                first, LJ1, real1, recipEnergy1 = potential(
+                    system,
+                    Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                    ewald,
+                    qq_q,
+                    qq_r,
+                    #kfacs,
                 )
-            #println("outer: ", deltaRecip)
-            # Calculate difference in old and new system energy
-            delta = (partial_new_e ) - (partial_old_e) + deltaRecip
-                #(partial_new_e + recipEnergy) - (partial_old_e)
-            #println(delta)
-            # Test if we accept the move
-            #println(delta, "    ", delta / temperature)
-            if Metropolis(delta / temperature) # make sure units work
-                total.energy += delta
-                total.virial += (partial_new_v  - partial_old_v  ) + deltaRecip/3 # + recipEnergy / 3
-                #total.recipOld = recipEnergy
-                #total.recip = recipEnergy
-                totProps.numTranAccepted += 1
-                ne = averages.old_e + delta
-                nv =
-                    averages.old_v + partial_new_v  - partial_old_v + deltaRecip / 3#+ recipEnergy / 3
-                averages.energy += ne
-                averages.virial += nv
-                averages.old_e = ne
-                averages.old_v = nv
-                #averages.recipOld = recipEnergy
-                #averages.recip = recipEnergy
-                totProps.quat[i] = ei
-            else
-                system.rm[i] = rm_old
+                =#
+                #################################################
+                #
+                #      Move and Rotate a particle
+                #
+                #################################################
+
+                rm_old = deepcopy(system.rm[i])
+                ra_old =
+                    deepcopy(system.ra[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]])
+
+                ##recipEnergy = RecipLong(system, ewald, ra_old, qq_q[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]], ewald.cfac) * ewald.factor
+                ##partial_old_e += total.recipOld #  recipEnergy
+                ##partial_old_v += total.recipOld / 3.0 #recipEnergy / 3
+
+
+                # move particle
+                rnew = random_translate_vector(totProps.dr_max, system.rm[i], box)
+                system.rm[i] = rnew
+                # rotate molecule and update atom positions
+                ei = random_rotate_quaternion(totProps.dϕ_max, totProps.quat[i]) #quaternion()
+                ai = q_to_a(ei) # Rotation matrix for i
+                ra_new = []
+                for a = 1:at_per_mol # Loop over all atoms
+                    push!(ra_new, SVector(rnew + SVector(MATMUL(ai, db[:, a]))))
+                end # End loop over all atoms
+                ra_new = [SVector(item...) for item in ra_new]
+
+                # Update atom coords
                 system.ra[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]] =
-                    ra_old
+                    ra_new
+                # Update charge coords
                 qq_r[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]] =
-                    ra_old
-                averages.energy += averages.old_e
-                averages.virial += averages.old_v
-                averages.recip = averages.recipOld
-            end
+                    ra_new
 
-            # for troubleshooting checks that particles are in box
-            minV, maxV = maxmin(system.rm)
-            #println(minV, maxV)
-            if minV < 0.0
-                println("Shit, particle is less than 0")
-            end
-            if maxV > box
-                println("Shit, particle is outside box")
-            end
-
-            totProps.totalStepsTaken += 1
-
-        end # i to nAtoms
+                # Calculate new LJ energy
+                partial_new_e, partial_new_v = LJ_poly_ΔU(i, system)
+                LLJ2 = partial_new_e
+                # calculate new real contribution to ewalds
+                if coulombStyle == "bare"
+                    partial_ewald_e,  overlap2 =
+                    CoulombReal(qq_r, qq_q, box, i, system)
+                else
+                    partial_ewald_e, partial_ewald_v, overlap2 =
+                        EwaldShort(i, system, ewald, box, qq_r, qq_q, false)
+                        partial_new_v += partial_ewald_v
+                end
+                reall2 = partial_ewald_e * ewald.factor
+                partial_new_e += partial_ewald_e * ewald.factor
 
 
-    end # step to nSteps
-    #total2 = potential(system, Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
-    #if abs(total2.energy - total.energy) > 0.001
-    #    println("SHITTTTTT, things aren't adding up")
-    #end
-    PrintPDB(system.ra, box, blk, "pdbOutput_atoms")
-    PrintPDB(qq_r, box, blk, "pdbOutput_qq")
-    # Hella ugly output
-    # TODO (BDK) modify to formatted output
-    println(
-        blk,
-        " Energy: ",
-        averages.energy / totProps.totalStepsTaken / nMol,
-        " Ratio: ",
-        totProps.numTranAccepted / totProps.totalStepsTaken,
-        " Pressure: ",
-        ρ * temperature + averages.virial / box^3 / totProps.totalStepsTaken, #  Pressure(total, ρ, temperature, box^3),
-        " Pcut: ",
-        pressure_lrc(ρ, system.r_cut),
-        " Ecorr: ",
-        potential_lrc(ρ, r_cut),
-        "p delta: ",
-        pressure_delta(ρ, system.r_cut),
-        " A & T p_c: ",
-        ρ * temperature +
-        averages.virial / box^3 / totProps.totalStepsTaken +
-        pressure_delta(ρ, system.r_cut),
-        " instant energy: ",
-        total.energy / nMol,
-        " instant pressure: ",
-        Pressure(total, ρ, temperature, box^3) +
-        pressure_delta(ρ, system.r_cut),
-    )
-    println("box: ", box, "  density: ", ρ)
+                # Calculate new recipricol energy
+                # note: this is a total energy, not the energy of i with the system
+                ##recipEnergy =
+                #RecipLong(system, ewald, qq_r, qq_q, kfacs) * ewald.factor
+                ##    RecipLong(system, ewald, qq_r, qq_q) * ewald.factor
+                #recipEnergy = RecipLong(system, ewald, ra_new, qq_q[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]], ewald.cfac) * ewald.factor
+                ##partial_new_e += recipEnergy
+                ##partial_new_v += recipEnergy / 3
+                if overlap1 || overlap2
+                    overlap = true
+                else
+                    overlap = false
+                end
 
-    PrintOutput(
-        system,
-        totProps,
-        atomType,
-        atomName,
-        qq_r,
-        qq_q,
-        box,
-        blk,
-        "xyz_quat",
-    )
-end # blk to nblock
+                if overlap == false && coulombStyle != "bare"
+                    deltaRecip =
+                        RecipMove(
+                            system,
+                            ewald,
+                            ra_old,
+                            ra_new,
+                            qq_q[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]],
+                        ) * ewald.factor
+                else
+                    deltaRecip = 0.0
+                end
+                #println("outer: ", deltaRecip)
+                # Calculate difference in old and new system energy
+                delta = (partial_new_e) - (partial_old_e) + deltaRecip
+                #=
+                second, LJ2, real2, recipEnergy2 = potential(
+                    system,
+                    Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                    ewald,
+                    qq_q,
+                    qq_r,
+                    #kfacs,
+                )
+                # #=
+                println("total diff: ", second.energy - first.energy)
+                println("single diff: ", delta)
+                println("diff LJ full: ", LJ2 - LJ1)
+                println("diff real full: ", real2 - real1)
+                println("diff recip full: ", recipEnergy2 - recipEnergy1)
+                println("diff recip single: ", deltaRecip)
+                println("diff real single: ", reall2 - reall1)
+                println("diff LJ single: ", LLJ2 - LLJ1)
+                sleep(1)
+                # =#
+                delta = second.energy - first.energy
+                =#
+                #sleep(1)
+                #(partial_new_e + recipEnergy) - (partial_old_e)
+                #println(delta , "      ", deltaRecip)
+                # Test if we accept the move
+
+                if overlap
+                    ovr_count += 1
+                end
+                if Metropolis(delta / temperature) && overlap == false# make sure units work
+                    total.energy += delta
+                    total.virial += (partial_new_v - partial_old_v) + deltaRecip / 3 # + recipEnergy / 3
+                    #total.recipOld = recipEnergy
+                    #total.recip = recipEnergy
+                    totProps.numTranAccepted += 1
+                    trans_moves.naccept += 1
+                    ne = averages.old_e + delta
+                    nv =
+                        averages.old_v + partial_new_v - partial_old_v +
+                        deltaRecip / 3#+ recipEnergy / 3
+                    averages.energy += ne
+                    averages.virial += nv
+                    averages.old_e = ne
+                    averages.old_v = nv
+                    #averages.recipOld = recipEnergy
+                    #averages.recip = recipEnergy
+                    totProps.quat[i] = ei
+                else
+                    system.rm[i] = rm_old
+                    system.ra[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]] =
+                        ra_old
+                    qq_r[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]] =
+                        ra_old
+                    averages.energy += averages.old_e
+                    averages.virial += averages.old_v
+                    averages.recip = averages.recipOld
+                end
+
+                # for troubleshooting checks that particles are in box
+                minV, maxV = maxmin(system.rm)
+                #println(minV, maxV)
+                if minV < 0.0
+                    println("Shit, particle is less than 0")
+                end
+                if maxV > box
+                    println("Shit, particle is outside box")
+                end
+
+                totProps.totalStepsTaken += 1
+                trans_moves.attempt += 1
+
+            end # i to nAtoms
+            trans_moves.dr_max = totProps.dr_max
+            trans_moves = Adjust!(trans_moves,box)
+            totProps.dr_max = trans_moves.dr_max
+
+
+        end # step to nSteps
+        println(trans_moves.naccept / trans_moves.attempt, "   ", trans_moves.dr_max)
+        #total2 = potential(system, Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+        #if abs(total2.energy - total.energy) > 0.001
+        #    println("SHITTTTTT, things aren't adding up")
+        #end
+        PrintPDB(system.ra, box, blk, "pdbOutput_atoms")
+        #PrintPDB(qq_r, box, blk, "pdbOutput_qq")
+        # Hella ugly output
+        # TODO (BDK) modify to formatted output
+        println(
+            blk,
+            " Energy: ",
+            averages.energy / totProps.totalStepsTaken / nMol,
+            " Ratio: ",
+            totProps.numTranAccepted / totProps.totalStepsTaken,
+            " Pressure: ",
+            ρ * temperature + averages.virial / box^3 / totProps.totalStepsTaken, #  Pressure(total, ρ, temperature, box^3),
+            " Pcut: ",
+            pressure_lrc(ρ, system.r_cut),
+            " Ecorr: ",
+            potential_lrc(ρ, r_cut),
+            "p delta: ",
+            pressure_delta(ρ, system.r_cut),
+            " A & T p_c: ",
+            ρ * temperature +
+            averages.virial / box^3 / totProps.totalStepsTaken +
+            pressure_delta(ρ, system.r_cut),
+            " instant energy: ",
+            total.energy / nMol,
+            " instant pressure: ",
+            Pressure(total, ρ, temperature, box^3) +
+            pressure_delta(ρ, system.r_cut),
+            " overlap count: ", ovr_count
+        )
+        println("box: ", box, "  density: ", ρ)
+
+        PrintOutput(
+            system,
+            totProps,
+            atomType,
+            atomName,
+            qq_r,
+            qq_q,
+            box,
+            blk,
+            "xyz_quat",
+        )
+    end # blk to nblock
+end
+
+Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
+                qq_q, qq_r, ewald, averages, ρ, atomName, atomType, coulombStyle)
 
 PrintOutput(
     system,

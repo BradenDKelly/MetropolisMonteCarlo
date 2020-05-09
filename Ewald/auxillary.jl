@@ -42,6 +42,15 @@ mutable struct Properties
     old_v::Float64
 end
 
+mutable struct Moves
+    naccepp::Int           # previous number of attempts
+    naccept::Int           # current number of attempts
+    attempp::Int
+    attempt::Int
+    set_value::Float64     # desired success rate
+    dr_max::Float64
+end
+
 
 """Struct for FF parameters (currently LJ and EXP6) """
 struct Tables #{T<:Vector} #<: ForceField

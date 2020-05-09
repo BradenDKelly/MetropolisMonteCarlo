@@ -184,7 +184,7 @@ alpha2 = alpha / 2.0
 at_per_mol = 3
 db = reshape([0.816, 0.0 , 0.577 ,
               0.0,  0.0 , 0.0,
-              1.633,  0.0 , 0.0],3,at_per_mol)
+              1.633,  0.0 , 0.0],3,at_per_mol) 
 #=
 db = reshape([x1, y1 , z1 ,
               x2, y2 , z2 ,
