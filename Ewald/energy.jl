@@ -145,7 +145,7 @@ function LJ_poly_ΔU(i::Int, system::Requirements)
     table = system.table
     box = system.box
     r_cut = system.r_cut
-    diameter = r_cut * 0.25  #2.0 * sqrt( maximum( sum(db^2,dim=1) ) )
+    diameter = 0 #r_cut * 0.25 + 5 #2.0 * sqrt( maximum( sum(db^2,dim=1) ) )
     rm_cut_box = (r_cut + diameter)       # Molecular cutoff in box=1 units
     rm_cut_box_sq = rm_cut_box^2              # squared
     r_cut_sq = r_cut^2                   # Potential cutoff squared in sigma=1 units
@@ -154,11 +154,13 @@ function LJ_poly_ΔU(i::Int, system::Requirements)
 
     pot, vir = 0.0, 0.0
 
-    for (j, rj) in enumerate(rMol)
+    # cycle through all molecules
+    @inbounds for (j, rj) in enumerate(rMol)
         if j == i
-            continue
+            continue # skip if molecule j is same as i
         end
 
+        """Molecular mirror image separation"""
         @inbounds for k = 1:3
             rᵢⱼ = @set rᵢⱼ[k] = vector1D(ri[k], rj[k], box)
         end
@@ -173,6 +175,7 @@ function LJ_poly_ΔU(i::Int, system::Requirements)
                 """Loop over all atoms in molecule B"""
                 @inbounds for b = sF[j][1]:sF[j][2]
 
+                    """Atomic mirror image separation"""
                     @inbounds for k = 1:3
                         rab = @set rab[k] = vector1D(ra[a][k], rb[b][k], box)
                     end
@@ -180,8 +183,8 @@ function LJ_poly_ΔU(i::Int, system::Requirements)
                     rab² = rab[1] * rab[1] + rab[2] * rab[2] + rab[3] * rab[3]
 
                     ϵᵢⱼ = table.ϵᵢⱼ[moli_type[a], list_type[b]]
-                    if rab² < r_cut_sq && ϵᵢⱼ > 0.001
-
+                    if rab² < (r_cut_sq + 100) && ϵᵢⱼ > 0.001
+                        # this uses only molecular cutoff
 
                         σᵢⱼ = table.σᵢⱼ[moli_type[a], list_type[b]]
 
@@ -275,7 +278,8 @@ function potential(system, tot)
 
 end
 
-""" Calculates total LJ potential energy of the system. Double Counts. """
+""" Calculates total LJ && Electrostatic potential energy of the system.
+ Double Counts. """
 function potential(
     system,
     tot,
@@ -297,14 +301,19 @@ function potential(
     #     Calculate LJ
     #
     ##################
-    ener, vir = LJ_poly_ΔU(2, system)
-    @time for i = 1:length(system.rm)
+    LJ, real, recip = 0.0, 0.0, 0.0
+
+    #ener, vir = LJ_poly_ΔU(2, system) # turn on for timing
+
+    for i = 1:length(system.rm)
         ener, vir = LJ_poly_ΔU(i, system)
         tot.energy += ener
         tot.virial += vir
+        LJ += ener
     end
     tot.energy = tot.energy / 2
     tot.virial = tot.virial / 2
+    LJ = LJ / 2
     println("Total LJ energy is: ", tot.energy)
 
     #########
@@ -314,36 +323,54 @@ function potential(
     ##################
 
     # Real
-    ener = EwaldReal(qq_r, qq_q, ewald.kappa, box, thisMol_thisAtom, 2, r_cut)
+    #ener = EwaldReal(qq_r, qq_q, ewald.kappa, box, thisMol_thisAtom, 2, system)
+    #=
+    qq_r::Vector{SVector{3,Float64}},
+    qq_q::Vector{Float64},
+    kappa::Real,
+    box::Float64,
+    thisMol_thisAtom::Vector,
+    chosenOne::Int64,
+    system::Requirements
+    =#
     totReal = 0.0
-    @time for i = 1:length(rm)
-        ener =
-            EwaldReal(qq_r, qq_q, ewald.kappa, box, thisMol_thisAtom, i, r_cut)
+    for i = 1:length(rm)
+        ener, overlap =
+            EwaldReal(qq_r, qq_q, ewalds.kappa, box, thisMol_thisAtom, i, system)
         totReal += ener
+        if overlap
+            exit()
+        end
     end
-    tot.energy += totReal / 2 * ewald.factor # divide by 2 to account for double counting
-    tot.coulomb += totReal / 2 * ewald.factor
-    println("Total real Ewald is: ", totReal / 2 * ewald.factor)
+    tot.energy += totReal / 2 * ewalds.factor # divide by 2 to account for double counting
+    tot.coulomb += totReal / 2 * ewalds.factor
+    reall = totReal / 2 * ewalds.factor
+
+    println("Total real Ewald is: ", totReal / 2 * ewalds.factor)
+
     # Recipricol
-    @time recipEnergy = RecipLong(system, ewald, qq_r, qq_q) * ewald.factor #RecipLong(system, ewald, qq_r, qq_q, kfacs)
-    @time recipEnergy = RecipLong(system, ewald, qq_r, qq_q) * ewald.factor #RecipLong(system, ewald, qq_r, qq_q, kfacs)
+    #@time recipEnergy = RecipLong(system, ewald, qq_r, qq_q) * ewald.factor #RecipLong(system, ewald, qq_r, qq_q, kfacs)
+    recipEnergy, ewalds = RecipLong(system, ewalds, qq_r, qq_q)  #RecipLong(system, ewald, qq_r, qq_q, kfacs)
+    recipEnergy *= ewalds.factor
     #@btime RecipLong(system, ewald, qq_r, qq_q) * ewald.factor
-    println("first: ", recipEnergy)
+    #println("first: ", recipEnergy)
+
     println("Total recipricol Ewald is: ", recipEnergy)
+
     tot.energy += recipEnergy #* ewald.factor
     tot.coulomb += recipEnergy #* ewald.factor
     tot.recipOld = recipEnergy #* ewald.factor
     tot.recip = recipEnergy #* ewald.factor
     # Self
 
-    println("Self energy: ", EwaldSelf(ewald, qq_q))
-    tot.energy += EwaldSelf(ewald, qq_q)
+    println("Self energy: ", EwaldSelf(ewalds, qq_q))
+    tot.energy += EwaldSelf(ewalds, qq_q)
     # tinfoil boundary
-    @time tinfoil = TinfoilBoundary(system, ewald, qq_q, qq_r)
-    println("tinfoil boundaries: ", tinfoil * ewald.factor)
-    tot.energy += tinfoil * ewald.factor
-    tot.coulomb += tinfoil * ewald.factor
-    return tot
+    #@time tinfoil = TinfoilBoundary(system, ewald, qq_q, qq_r)
+    #println("tinfoil boundaries: ", tinfoil * ewald.factor)
+    #tot.energy += tinfoil * ewald.factor
+    #tot.coulomb += tinfoil * ewald.factor
+    return tot, LJ, reall, recipEnergy, ewalds
 
 end
 
@@ -500,3 +527,250 @@ function ener_corr(system::Requirements, num_atom_types = 2, b = [100, 200])
     return coru
 
 end #Subroutine ener_corr
+
+"Real Ewald contribution with molecular cutoff"
+#function EwaldReal(diff,coord1, coord2,q1,q2, L, rcut2, kappa)
+function CoulombReal(
+    qq_r::Vector{SVector{3,Float64}},
+    qq_q::Vector{Float64},
+    box::Float64,
+    chosenOne::Int64,
+    system::Requirements
+)
+    ####
+    #
+    #    Some prep stuff
+    #    --------------------------------
+    #    system: a struct with arrays for molecular and atomic coords and other stuff
+    #    chosenOne: molecule that was moved
+    #    qq_q: array of atomic partial charges
+    #    qq_r: array of atomic coordinates. Each index is a Vector with x, y, z
+    #
+    #############
+    ri = system.rm[chosenOne]                       # x, y, z coordinates for COM of molecule "chosenOne"
+    thisMol_thisAtom = system.thisMol_theseAtoms    # length number of molecules
+    start_a = thisMol_thisAtom[chosenOne][1]        # this atom starts molecule "chosenOne"
+    end_a = thisMol_thisAtom[chosenOne][2]          # this atom ends molecule "chosenOne"
+    rMol = system.rm                                # array of molecule COM coords
+    r_cut = system.r_cut                            # site-site cutoff
+
+    diameter = r_cut * 0.25  + 5.0        # made up diameter of molecule
+    rm_cut_box = (r_cut + diameter)       # Molecular cutoff
+    rm_cut_box_sq = rm_cut_box^2          # Molecular cutoff squared
+    r_cut_sq = r_cut^2                    # atomic cutoff squared
+
+    # quick double check on atomic cutoffs
+    @assert r_cut == 10.0
+    #@assert r_cut_sq == 100.0
+
+    pot = 0.0
+    # Allocate for speed
+    rab = SVector{3, Float64}(0.0, 0.0, 0.0)
+    rij = SVector{3, Float64}(0.0, 0.0, 0.0)
+    rj = SVector{3, Float64}(0.0, 0.0, 0.0)
+    ra = SVector{3, Float64}(0.0, 0.0, 0.0)
+    rb = SVector{3, Float64}(0.0, 0.0, 0.0)
+
+    overlap = false
+    ovr = 1.0
+
+    for (j, rj) in enumerate(rMol) # cycle through all molecules
+        if j == chosenOne # skip self interactions
+            continue
+        end
+
+        #Molecular mirror image separation
+        for k = 1:3
+            rij = @set rij[k] = vector1D(ri[k], rj[k], box)
+        end
+
+        rij2 = rij[1] * rij[1] + rij[2] * rij[2] + rij[3] * rij[3]
+
+        #Molecular cutoff check
+        if rij2 < rm_cut_box_sq
+
+            #Loop over all atoms in molecule A
+            for a = start_a:end_a
+                ra = qq_r[a]
+
+                start_b = thisMol_thisAtom[j][1]  # first atom in molecule j
+                end_b = thisMol_thisAtom[j][2]    # last atom in molecule j
+
+                # Loop over all atoms in molecule B
+                for b=start_b:end_b
+                    rb = qq_r[b]       # coordinates of charge b
+
+                    # Atomic mirror image separation
+                    for k = 1:3
+                        rab = @set rab[k] = vector1D(ra[k], rb[k], box)
+                    end
+                    rab2 = rab[1] * rab[1] + rab[2] * rab[2] + rab[3] * rab[3]
+
+                    # Overlap Check
+                    if (rab2 < ovr) && (qq_q[a] * qq_q[b] < 0)
+                        println("got one")
+                        return 0.0, true
+                    # Atomic cutoff check
+                    elseif rab2 < r_cut_sq
+                        #println(a, "   ", b)
+                        #rab_mag =
+                        pot += qq_q[a] * qq_q[b] / sqrt(rab2)
+                    else
+                        pot += 0.0
+                    end # potential cutoff
+                end # loop over atom in molecule b
+            end # loop over atoms in molecule a
+        end # if statement for molecular cutoff
+    end # loop over molecules
+    return pot , overlap
+end
+
+""" Calculates total LJ && Bare Coulomb potential energy of the system.
+ Double Counts. """
+function potential(
+    system,
+    tot,
+    ewald::EWALD,
+    qq_q::Vector,
+    qq_r::Vector,
+    string,
+)
+
+    #tot = Properties(0.0,0.0)
+    ener, vir = 0.0, 0.0
+    r_cut = system.r_cut
+    #@assert r_cut == 10.0
+    box = system.box
+    thisMol_thisAtom = system.thisMol_theseAtoms
+    total.energy = 0.0
+    total.virial = 0.0
+    #########
+    #
+    #     Calculate LJ
+    #
+    ##################
+    LJ, real = 0.0, 0.0
+
+    #ener, vir = LJ_poly_ΔU(2, system) # turn on for timing
+
+    for i = 1:length(system.rm)
+        ener, vir = LJ_poly_ΔU(i, system)
+        tot.energy += ener
+        tot.virial += vir
+        LJ += ener
+    end
+    tot.energy = tot.energy / 2
+    tot.virial = tot.virial / 2
+    LJ = LJ / 2
+    println("Total LJ energy is: ", tot.energy)
+
+    #########
+    #
+    #     Calculate EWALD
+    #
+    ##################
+
+    # Real
+
+    totReal = 0.0
+    for i = 1:length(rm)
+        ener, overlap =
+            CoulombReal(qq_r, qq_q, box, i, system)
+        totReal += ener
+        if overlap
+            exit()
+        end
+    end
+    totReal *= ewald.factor / 2
+    tot.energy += totReal   # divide by 2 to account for double counting
+    tot.coulomb += totReal
+    reall = totReal
+    println("Coulomb contribution is: ", reall)
+
+
+    return tot, LJ, reall
+
+end
+
+""" Calculates total LJ && Wolf Summation potential energy of the system.
+ Double Counts. """
+function potential(
+    system,
+    tot,
+    ewald::EWALD,
+    qq_q::Vector,
+    qq_r::Vector,
+    string,
+    string2 #triggers wolf summations using double strings
+)
+
+    #tot = Properties(0.0,0.0)
+    ener, vir = 0.0, 0.0
+    r_cut = system.r_cut
+    #@assert r_cut == 10.0
+    box = system.box
+    thisMol_thisAtom = system.thisMol_theseAtoms
+    total.energy = 0.0
+    total.virial = 0.0
+    #########
+    #
+    #     Calculate LJ
+    #
+    ##################
+    LJ, real = 0.0, 0.0
+
+    #ener, vir = LJ_poly_ΔU(2, system) # turn on for timing
+
+    for i = 1:length(system.rm)
+        ener, vir = LJ_poly_ΔU(i, system)
+        tot.energy += ener
+        tot.virial += vir
+        LJ += ener
+    end
+    tot.energy = tot.energy / 2
+    tot.virial = tot.virial / 2
+    LJ = LJ / 2
+    println("Total LJ energy is: ", tot.energy)
+
+    #########
+    #
+    #     Calculate EWALD
+    #
+    ##################
+
+    # Real
+    totReal = 0.0
+    for i = 1:length(rm)
+        ener, overlap =
+            EwaldReal(qq_r, qq_q,ewald.kappa, box,thisMol_thisAtom, i, system)
+        totReal += ener
+        if overlap
+            exit()
+        end
+    end
+    totReal *= ewald.factor / 2
+    tot.energy += totReal   # divide by 2 to account for double counting
+    tot.coulomb += totReal
+    reall = totReal
+    println("Coulomb contribution is: ", reall)
+
+    prefactor = 0.0
+    for i=1:length(qq_q)
+        for j=1:length(qq_q)
+            prefactor += qq_q[i]*qq_q[j] * erfc(ewald.kappa*r_cut) / r_cut
+        end
+    end
+    prefactor *= -1
+    prefactor2 = (erfc(ewald.kappa*r_cut) / 2 / r_cut +ewald.kappa / sqrt(π) ) *
+                    dot(qq_q,qq_q)
+    tot.energy += (prefactor - prefactor2)*ewald.factor
+    tot.coulomb += (prefactor - prefactor2)*ewald.factor
+
+    println("total energy is: ", tot.energy)
+    println("total coulomb is: ", tot.coulomb)
+    println("total LJ energy is: ", tot.energy - tot.coulomb)
+
+
+    return tot
+
+end

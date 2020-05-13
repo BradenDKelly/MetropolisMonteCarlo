@@ -42,6 +42,7 @@ mutable struct Properties
     old_v::Float64
 end
 
+"""Struct for tracking and optimizing translation moves"""
 mutable struct Moves
     naccepp::Int           # previous number of attempts
     naccept::Int           # current number of attempts

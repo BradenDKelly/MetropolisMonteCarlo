@@ -2,15 +2,6 @@ function Adjust!(saved::Moves, L)
 # This code adjusts the maximum translation such that the probability of a successful move equals move_accept (fraction)
 # Written by Braden Kelly June 19, 2016 / modified for Julia April 2020
 # Based on the code by Frenkel and Smith (Fortran 77/90)
-
-#integer, intent(in)             :: attempt, naccept
-#integer                         :: attempp, naccepp  ! counts number of attempts and accepts from previous call
-#!real, intent(inout)             :: dr ! new adjusted displacement
-#real, intent(in)                :: L, move_accept
-#real                            :: ratio, dr_ratio, dr_old    ! ratio and place holder for old displacement
-#save naccepp, attempp
-
-
 #=
 ---------------------------
     naccepp is number of moves accepted as of previous call
