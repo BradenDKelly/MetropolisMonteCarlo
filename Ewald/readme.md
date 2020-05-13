@@ -8,7 +8,7 @@ x (Completed) need to test on fixed configurations provides by NIST for SPC/E wa
 
 (need to add NIST SPC/E tests as unit tests that can be routinely called for testing).
 
-Currently SPC/E works in the NVT ensemble (need to upload this code)
+Currently SPC/E works in the NVT ensemble (need to upload this code and upload a proper plot of an rdf, not the cliche excel default)
 
 ![](spce_rdf.png)
 
