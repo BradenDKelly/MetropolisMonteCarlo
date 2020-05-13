@@ -25,4 +25,6 @@ Currently SPC/E works in the NVT ensemble (need to upload this code and upload a
 
 ![](spce_rdf.png)
 
+![](spce_box.png)
+
 
