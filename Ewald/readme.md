@@ -8,5 +8,8 @@ x (Completed) need to test on fixed configurations provides by NIST for SPC/E wa
 
 (need to add NIST SPC/E tests as unit tests that can be routinely called for testing).
 
-Ewalds works fine, need to implement into moves, and test pressure calculation. Wqq = Vqq/3.
+Currently SPC/E works in the NVT ensemble (need to upload this code)
+
+![](images/spce_rdf)
+
 
