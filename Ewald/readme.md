@@ -1,12 +1,25 @@
-Implementation for rigid polyatomic Metropolis Monte Carlo with Ewald summation for electrostatics. 
+Implementation for rigid polyatomic Metropolis Monte Carlo
 
-While individual functions have been previously tested and passed, I have not thrown them all together into a cohesive simulation. So, there will be some kinks to work out.
+Currently implemented:
 
-- need to add in wolf summation
+Ensembles:
+  1. NVT
 
-x (Completed) need to test on fixed configurations provides by NIST for SPC/E water https://www.nist.gov/mml/csd/chemical-informatics-research-group/spce-water-reference-calculations-10a-cutoff 
+Electrostatics:
+  1. Bare coulomb
+  2. Wolf Summation
+  3. Ewald Summation
 
-(need to add NIST SPC/E tests as unit tests that can be routinely called for testing).
+TODO:
+  1. Add pressure calculation
+  2. Add NPT ensemble
+  3. Add reaction ensemble (REMC)
+  4. Add configurational Bias
+  5. Add Grand Canonical MC
+  6. Add Gibbs ensemble
+  7. Add flexible force-fields and moves
+  8. Add neighbor-list
+
 
 Currently SPC/E works in the NVT ensemble (need to upload this code and upload a proper plot of an rdf, not the cliche excel default)
 
