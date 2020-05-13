@@ -10,6 +10,6 @@ x (Completed) need to test on fixed configurations provides by NIST for SPC/E wa
 
 Currently SPC/E works in the NVT ensemble (need to upload this code)
 
-![](images/spce_rdf)
+![](spce_rdf.png)
 
 
