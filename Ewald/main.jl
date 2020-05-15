@@ -36,11 +36,14 @@ start = Dates.now()
 println(Dates.now())
 
 ################################################################################
+# TODO (BDK) Implement pressure /w ewalds and wolf summation
 # TODO (BDK) Make functions in place so no temp arrays are generated
+# TODO (BDK) make input density in kg/m3 and convert
 # TODO (BDK) read in checkpoint file/ make restart file
-# TODO (BDK) Separate translation and rotation moves
+# TODO (BDK) Separate translation and rotation moves (done ✔)
 # TODO (BDK) Tidy up code
 # TODO (BDK) create JSON input file with starting parameters:
+# TODO (BDK) make fully generalized setup
 # TODO (BDK) add proper sampling
 # TODO (BDK) Add some timing (~ 30 times faster than numpy)
 # TODO (BDK) write more unit tests
@@ -621,11 +624,12 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
         #PrintPDB(qq_r, box, blk, "pdbOutput_qq")
         # Hella ugly output
         # TODO (BDK) modify to formatted output
-        line = @sprintf("Block: %4d, Energy: %8.2f, Ratio: %4.2f, dr_max: %4.2f, dϕ_max: %4.2f, instant energy: %8.2f, overlap count: %4d, pressure: %8.2f",
+        line = @sprintf("Block: %4d, Energy: %8.2f, Ratio trans: %4.2f, dr_max: %4.2f, Ratio rot: %4.2f, dϕ_max: %4.2f, instant energy: %8.2f, overlap count: %4d, pressure: %8.2f",
                         blk,
                         averages.energy / totProps.totalStepsTaken / nMol,
-                        totProps.numTranAccepted / totProps.totalStepsTaken,
+                        trans_moves.naccept / trans_moves.attempt,
                         trans_moves.d_max,
+                        rot_moves.naccept / rot_moves.attempt,
                         rot_moves.d_max,
                         total.energy / nMol,
                         ovr_count,
