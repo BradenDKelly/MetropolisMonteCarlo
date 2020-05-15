@@ -21,14 +21,13 @@ TODO:
   8. Add neighbor-list
 
 
-Currently SPC/E works in the NVT ensemble (need to upload a proper plot of an rdf, not the cliche excel default)
+Currently SPC/E works in the NVT ensemble with bare, Wolf or Ewald summation for electrostatics and LJ for vdW.
 
 There is lots of optimization needing to be done, lots of allocations being made. Need to make functions in place modifications rather than returning new arrays or values.
 
 A simulation of 1000 SPC/E water molecules takes about 6 hours to do 10,000,000 monte carlo steps (translation + rotation). Pretty good for serial version. And again, code needs to be cleaned up, generalized and optimized. Lots to do.
 
 ![](SPCE_W_E.png)
-![](spce_rdf.png)
 
 ![](spce_box.png)
 
