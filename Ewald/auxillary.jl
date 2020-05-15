@@ -49,7 +49,7 @@ mutable struct Moves
     attempp::Int
     attempt::Int
     set_value::Float64     # desired success rate
-    dr_max::Float64
+    d_max::Float64
 end
 
 
