@@ -36,8 +36,10 @@ start = Dates.now()
 println(Dates.now())
 
 ################################################################################
+# TODO (BDK) Make functions in place so no temp arrays are generated
 # TODO (BDK) read in checkpoint file/ make restart file
 # TODO (BDK) Separate translation and rotation moves
+# TODO (BDK) Tidy up code
 # TODO (BDK) create JSON input file with starting parameters:
 # TODO (BDK) add proper sampling
 # TODO (BDK) Add some timing (~ 30 times faster than numpy)
@@ -60,8 +62,8 @@ nSteps = 100
 nblock = 100
 outputInterval = 100
 initialConfiguration = "crystal"  # place atoms in a crystal structure
-dϕ_max = 0.15
-dr_max = 0.05
+dr_max = 0.15
+dϕ_max = 0.05
 coulombStyle = "ewald"
 Wolf = false
 
@@ -78,6 +80,23 @@ defaults = Dict(
     "ϵ" => 1.0,
     "σ" => 1.0,
 )
+
+probability_of_move = Dict(
+    "translation" => 0.5,
+    "rotation" => 0.5
+)
+sum_value = 0.0
+for (key, value) in probability_of_move
+    global sum_value
+    sum_value += value
+    probability_of_move[key] = sum_value
+end
+# ensure probabilities sum to 1.0
+for (key, value) in probability_of_move
+    probability_of_move[key] /= sum_value
+end
+println(probability_of_move)
+
 
 
 ################################################################################
@@ -336,6 +355,7 @@ totProps = Properties2(
 )
 
 trans_moves = Moves(0,0,0,0,0.5, dr_max)
+rot_moves = Moves(0,0,0,0,0.5, dϕ_max)
 
 println("TEst rcut, press_corr ", system.r_cut, "...........", factor)
 println(ener_corr(system, 2, [system.nMols, system.nAtoms]))
@@ -420,7 +440,7 @@ testing = false
 #@code_warntype CoulombReal(qq_r, qq_q, box, 3, system)
 
 function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
-                qq_q, qq_r, ewald, averages, ρ, atomName, atomType, coulombStyle)
+    rot_moves,qq_q, qq_r, ewald, averages, ρ, atomName, atomType, coulombStyle)
     @assert system.r_cut < box / 2
     @assert ρ > 0.0
     @assert box > 0.0
@@ -448,25 +468,37 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
 
                 #################################################
                 #
-                #      Move and Rotate a particle
+                #      Move or Rotate a particle
                 #
                 #################################################
 
                 rm_old = deepcopy(system.rm[i])
                 ra_old =
                     deepcopy(system.ra[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]])
+                chose_move = rand()
+
+                if chose_move < probability_of_move["translation"]
                 # move particle
-                rnew = random_translate_vector(totProps.dr_max, system.rm[i], box)
-                system.rm[i] = rnew
-                # rotate molecule and update atom positions
-                ei = random_rotate_quaternion(totProps.dϕ_max, totProps.quat[i]) #quaternion()
-                ai = q_to_a(ei) # Rotation matrix for i
+                    trans_moves.attempt += 1
+                    rnew = random_translate_vector(totProps.dr_max, system.rm[i], box)
+                    system.rm[i] = rnew
+                    ei = totProps.quat[i]
+                    ai = q_to_a(ei)
+                elseif chose_move <= probability_of_move["rotation"]
+                    rot_moves.attempt += 1
+                    rnew = system.rm[i]
+                    # rotate molecule and update atom positions
+                    ei = random_rotate_quaternion(totProps.dϕ_max, totProps.quat[i]) #quaternion()
+                    ai = q_to_a(ei) # Rotation matrix for i
+                else
+                    println("No move selected, exiting main.jl ~ line 490")
+                    exit()
+                end
                 ra_new = []
                 for a = 1:at_per_mol # Loop over all atoms
                     push!(ra_new, SVector(rnew + SVector(MATMUL(ai, db[:, a]))))
                 end # End loop over all atoms
                 ra_new = [SVector(item...) for item in ra_new]
-
 
 
                 # Update atom coords
@@ -525,7 +557,11 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
                     #total.recipOld = recipEnergy
                     #total.recip = recipEnergy
                     totProps.numTranAccepted += 1
-                    trans_moves.naccept += 1
+                    if chose_move < probability_of_move["translation"]
+                        trans_moves.naccept += 1
+                    elseif chose_move <= probability_of_move["rotation"]
+                        rot_moves.naccept += 1
+                    end
                     ne = averages.old_e + delta
                     nv =
                         averages.old_v + partial_new_v - partial_old_v +
@@ -561,18 +597,22 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
                 end
 
                 totProps.totalStepsTaken += 1
-                trans_moves.attempt += 1
+
 
             end # i to nAtoms
-            trans_moves.dr_max = totProps.dr_max
+            trans_moves.d_max = totProps.dr_max
             trans_moves = Adjust!(trans_moves,box)
-            totProps.dr_max = trans_moves.dr_max
+            totProps.dr_max = trans_moves.d_max
+
+            rot_moves.d_max = totProps.dϕ_max
+            rot_moves = Adjust_rot!(rot_moves,box)
+            totProps.dϕ_max = rot_moves.d_max
 
             @assert qq_r == system.ra
 
 
         end # step to nSteps
-        #println(trans_moves.naccept / trans_moves.attempt, "   ", trans_moves.dr_max)
+        #println(trans_moves.naccept / trans_moves.attempt, "   ", trans_moves.d_max)
         #total2 = potential(system, Properties(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
         #if abs(total2.energy - total.energy) > 0.001
         #    println("SHITTTTTT, things aren't adding up")
@@ -581,13 +621,15 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
         #PrintPDB(qq_r, box, blk, "pdbOutput_qq")
         # Hella ugly output
         # TODO (BDK) modify to formatted output
-        line = @sprintf("Block: %4d, Energy: %8.2f, Ratio: %4.2f, dr_max: %4.2f, instant energy: %8.2f, overlap count: %4d",
+        line = @sprintf("Block: %4d, Energy: %8.2f, Ratio: %4.2f, dr_max: %4.2f, dϕ_max: %4.2f, instant energy: %8.2f, overlap count: %4d, pressure: %8.2f",
                         blk,
                         averages.energy / totProps.totalStepsTaken / nMol,
                         totProps.numTranAccepted / totProps.totalStepsTaken,
-                        trans_moves.dr_max,
+                        trans_moves.d_max,
+                        rot_moves.d_max,
                         total.energy / nMol,
-                        ovr_count
+                        ovr_count,
+                        4.60453 + total.virial / box / box / box
                         )
         println(line)
 
@@ -607,7 +649,7 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
     end # blk to nblock
 end
 
-Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
+Loop(system, totProps, ovr_count, box, temperature, total, trans_moves, rot_moves,
                 qq_q, qq_r, ewald, averages, ρ, atomName, atomType, coulombStyle)
 
 PrintOutput(

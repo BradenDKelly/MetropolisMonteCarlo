@@ -1,6 +1,10 @@
 #####
 #
-#                   Quaternion Routines
+#                           Quaternion Routines
+#
+#               Borrowed Heavily from Allen & Tildesley 2017
+#
+#               https://github.com/Allen-Tildesley/examples
 #
 #####
 
