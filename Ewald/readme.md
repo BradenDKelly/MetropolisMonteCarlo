@@ -27,7 +27,7 @@ There is lots of optimization needing to be done, lots of allocations being made
 
 A simulation of 1000 SPC/E water molecules takes about 6 hours to do 10,000,000 monte carlo steps (translation + rotation). Pretty good for serial version. And again, code needs to be cleaned up, generalized and optimized. Lots to do.
 
-![](SPC_E water RDF - Wolf & Ewald.png)
+![](SPCE_W_E.png)
 ![](spce_rdf.png)
 
 ![](spce_box.png)
