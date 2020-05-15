@@ -1,7 +1,7 @@
 # Metropolis Monte Carlo
-This is my playground which will be used for testing new ideas and algorithms. At the moment it has working rigid polyatomics with Ewald summation.
+This is my playground which will be used for testing new ideas and algorithms. At the moment it has working rigid polyatomics with Ewald or Wolf summation.
 
-#Goals:
+# Goals:
   1) add flexible molecules
   2) add force routines and provide molecular dynamics
   3) add free energy calculations
