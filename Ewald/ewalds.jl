@@ -88,16 +88,17 @@ function PrepareEwaldVariables(ewald::EWALD, boxSize::Real where {T})
         end # ky
     end # kx
     #ewald = EWALD(ewald.kappa, ewald.nk, ewald.k_sq_max, cfac, fact)
-    ewald = EWALD(ewald.kappa,
-                ewald.nk,
-                ewald.k_sq_max,
-                NKVECS,
-                kxyz,
-                cfac,
-                zeros(ComplexF64, NKVECS),    # dummy values
-                zeros(ComplexF64, NKVECS),
-                fact
-                )
+    ewald = EWALD(
+        ewald.kappa,
+        ewald.nk,
+        ewald.k_sq_max,
+        NKVECS,
+        kxyz,
+        cfac,
+        zeros(ComplexF64, NKVECS),    # dummy values
+        zeros(ComplexF64, NKVECS),
+        fact,
+    )
     return ewald #cfac, kxyz, ewald
 end # function
 
@@ -208,7 +209,7 @@ function EwaldReal(
     box::Float64,
     thisMol_thisAtom::Vector{SVector{2,Int64}},
     chosenOne::Int64,
-    system::Requirements
+    system::Requirements,
 )
     ####
     #
@@ -228,12 +229,12 @@ function EwaldReal(
     r_cut_sq = r_cut^2
     #@assert r_cut_sq == 100.0
     pot = float(0.0)
-    rab = SVector{3, Float64}(0.0, 0.0, 0.0)
-    rij = SVector{3, Float64}(0.0, 0.0, 0.0)
+    rab = SVector{3,Float64}(0.0, 0.0, 0.0)
+    rij = SVector{3,Float64}(0.0, 0.0, 0.0)
     #ri = similar(rab)
-    rj = SVector{3, Float64}(0.0, 0.0, 0.0)
-    ra = SVector{3, Float64}(0.0, 0.0, 0.0)
-    rb = SVector{3, Float64}(0.0, 0.0, 0.0)
+    rj = SVector{3,Float64}(0.0, 0.0, 0.0)
+    ra = SVector{3,Float64}(0.0, 0.0, 0.0)
+    rb = SVector{3,Float64}(0.0, 0.0, 0.0)
 
     overlap = false
     ovr = 1.0
@@ -258,7 +259,7 @@ function EwaldReal(
                 #@inbounds for (b, rb) in enumerate(qq_r)
                 start_b = thisMol_thisAtom[j][1]
                 end_b = thisMol_thisAtom[j][2]
-                @inbounds for b=start_b:end_b
+                @inbounds for b = start_b:end_b
                     rb = qq_r[b]
                     #if b in start_a:end_a
                     #    continue
@@ -275,7 +276,8 @@ function EwaldReal(
                         # this uses only molecular cutoff, hence the +100
                         # TODO remove this if statement
                         rab_mag = sqrt(rab2)
-                        pot += qq_q[a] * qq_q[b] * erfc(kappa * rab_mag) / rab_mag
+                        pot +=
+                            qq_q[a] * qq_q[b] * erfc(kappa * rab_mag) / rab_mag
                     else
                         pot += 0.0
                     end # potential cutoff
@@ -376,12 +378,12 @@ function RecipLong(
     system::Requirements,
     ewald::EWALD,
     r::Vector{SVector{3,Float64}},
-    qq_q::Vector{Float64}
+    qq_q::Vector{Float64},
 )
-#=
-Intended to calculate the recipricol for the molecule that was moved, not then
-entire system.
-=#
+    #=
+    Intended to calculate the recipricol for the molecule that was moved, not then
+    entire system.
+    =#
     #cfac = ewald.cfac
     kxyz = ewald.kxyz[:]
     energy = 0.0
@@ -425,11 +427,15 @@ entire system.
     end
     # TODO This can be sped up. It is generating too many temp Arrays
     # It should be faster if devectorized, but that makes even more temp arrays
-    term = 0.0 + 0.0*im
-    for i=1:length(ewald.cfac)
-        term = 0.0 + 0.0*im
+    term = 0.0 + 0.0 * im
+    for i = 1:length(ewald.cfac)
+        term = 0.0 + 0.0 * im
         for l = 1:n
-            term += qq_q[l] * eikx[l,kxyz[i][1]] * eiky[l,kxyz[i][2]]* eikz[l,kxyz[i][3]]#* eiky[l,kxyz[i][2]] * eikz[l,kxyz[i][3]]
+            term +=
+                qq_q[l] *
+                eikx[l, kxyz[i][1]] *
+                eiky[l, kxyz[i][2]] *
+                eikz[l, kxyz[i][3]]#* eiky[l,kxyz[i][2]] * eikz[l,kxyz[i][3]]
         end
         #term = sum( qq_q[:] .* eikx[:,kxyz[i][1]] .* eiky[:,kxyz[i][2]] .* eikz[:,kxyz[i][3]] )
         energy += ewald.cfac[i] * real(conj(term) * term)
@@ -468,7 +474,7 @@ function RecipMove(
     @assert k_sq_max == 27
     @assert nk == 5
 
-    eikx_n= OffsetArray{Complex{Float64}}(undef, 1:n, 0:nk) #SArray{n,nk+2}([0.0 + 0.0*im for i=1:n for j=1:(nk+2) ]...)   #undef,n,nk+2)
+    eikx_n = OffsetArray{Complex{Float64}}(undef, 1:n, 0:nk) #SArray{n,nk+2}([0.0 + 0.0*im for i=1:n for j=1:(nk+2) ]...)   #undef,n,nk+2)
     eiky_n = OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk) #zeros(ComplexF64,n,2*nk+2) #SArray{n,2*nk+2}([0.0 + 0.0*im for i=1:n for j=1:(2*nk+2) ]...)  #(undef,n,2*nk+2)
 
     eikz_n = OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk) #similar(eiky_n) #  OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk)
@@ -526,19 +532,25 @@ function RecipMove(
 
     # Calculate difference between the twopi
 
-     for i=1:length(ewalds.cfac)
-
+    for i = 1:length(ewalds.cfac)
         for l = 1:n
-
-             ewalds.sumQExpNew[i] += qq_q[l] *
-                ( eikx_n[l,kxyz[i][1]] * eiky_n[l,kxyz[i][2]] *  eikz_n[l,kxyz[i][3]]
-                - eikx_o[l,kxyz[i][1]] * eiky_o[l,kxyz[i][2]] *  eikz_o[l,kxyz[i][3]] )
+            ewalds.sumQExpNew[i] +=
+                qq_q[l] * (
+                    eikx_n[l, kxyz[i][1]] *
+                    eiky_n[l, kxyz[i][2]] *
+                    eikz_n[l, kxyz[i][3]] -
+                    eikx_o[l, kxyz[i][1]] *
+                    eiky_o[l, kxyz[i][2]] *
+                    eikz_o[l, kxyz[i][3]]
+                )
         end
 
 
-        energy += ewalds.cfac[i] *
-                ( real(conj(ewalds.sumQExpNew[i]) * ewalds.sumQExpNew[i]) -
-                  real(conj(ewalds.sumQExpOld[i]) * ewalds.sumQExpOld[i]) )
+        energy +=
+            ewalds.cfac[i] * (
+                real(conj(ewalds.sumQExpNew[i]) * ewalds.sumQExpNew[i]) -
+                real(conj(ewalds.sumQExpOld[i]) * ewalds.sumQExpOld[i])
+            )
     end
 
     #
@@ -565,14 +577,14 @@ end
 """Calculates real, self and tinfoil contributions to Coulombic energy for
 a single molecule interacting with the rest of the system"""
 function EwaldShort(
-                    i::Int64,
-                    system::Requirements,
-                    ewald::EWALD,
-                    box::Float64,
-                    qq_r::Vector{SVector{3,Float64}},
-                    qq_q::Vector{Float64},
-                    tinfoil = false,
-                    )
+    i::Int64,
+    system::Requirements,
+    ewald::EWALD,
+    box::Float64,
+    qq_r::Vector{SVector{3,Float64}},
+    qq_q::Vector{Float64},
+    tinfoil = false,
+)
     partial_e = 0.0
     partial_v = 0.0
     overlap = false
@@ -584,7 +596,7 @@ function EwaldShort(
         box,
         system.thisMol_theseAtoms,
         i,
-        system
+        system,
     )
     realEwald *= ewald.factor
     partial_e += realEwald

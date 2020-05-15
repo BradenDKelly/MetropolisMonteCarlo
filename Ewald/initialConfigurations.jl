@@ -117,17 +117,14 @@ function PrintOutput(
 
     open(filename * "_" * string(step) * ".pdb", "w") do file
 
-        line = @sprintf(
-            "%-7s %7.3f %7.3f %7.3f\n",
-            "Output",
-            box,
-            box,
-            box,
-        )
+        line = @sprintf("%-7s %7.3f %7.3f %7.3f\n", "Output", box, box, box,)
         write(file, line)
         write(file, " Molecular coordinates and quaternions\n")
-        write(file, " #, mol name, atom Start, atom End, x, y, z, q0, q1, q2, q3\n")
-        for i=1:length(system.rm)
+        write(
+            file,
+            " #, mol name, atom Start, atom End, x, y, z, q0, q1, q2, q3\n",
+        )
+        for i = 1:length(system.rm)
             line = @sprintf(
                 "%4d %-7s %4d %4d %7.3f %7.3f %7.3f %7.3f %7.3f %7.3f %7.3f\n",
                 i,
@@ -146,7 +143,7 @@ function PrintOutput(
         end
         write(file, "Atom coordinates\n")
         write(file, "#, name, type, charge, x, y, z\n")
-        for i=1:length(system.ra)
+        for i = 1:length(system.ra)
             line = @sprintf(
                 "%4d %-7s %-7s %7.3f %7.3f %7.3f %7.3f \n",
                 i,
