@@ -84,10 +84,7 @@ defaults = Dict(
     "σ" => 1.0,
 )
 
-probability_of_move = Dict(
-    "translation" => 0.5,
-    "rotation" => 0.5
-)
+probability_of_move = Dict("translation" => 0.5, "rotation" => 0.5)
 sum_value = 0.0
 for (key, value) in probability_of_move
     global sum_value
@@ -357,8 +354,8 @@ totProps = Properties2(
     initQuaternions,
 )
 
-trans_moves = Moves(0,0,0,0,0.5, dr_max)
-rot_moves = Moves(0,0,0,0,0.5, dϕ_max)
+trans_moves = Moves(0, 0, 0, 0, 0.5, dr_max)
+rot_moves = Moves(0, 0, 0, 0, 0.5, dϕ_max)
 
 println("TEst rcut, press_corr ", system.r_cut, "...........", factor)
 println(ener_corr(system, 2, [system.nMols, system.nAtoms]))
@@ -372,7 +369,7 @@ if coulombStyle == "bare"
         ewald,
         qq_q,
         qq_r,
-        "bare"
+        "bare",
     )
 elseif Wolf
     total = potential(
@@ -382,7 +379,7 @@ elseif Wolf
         qq_q,
         qq_r,
         "wolf",
-        "wolf" # ad-hoc fix for now, double string goes to Wolf potential
+        "wolf", # ad-hoc fix for now, double string goes to Wolf potential
     )
 
 else
@@ -442,8 +439,24 @@ testing = false
 
 #@code_warntype CoulombReal(qq_r, qq_q, box, 3, system)
 
-function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
-    rot_moves,qq_q, qq_r, ewald, averages, ρ, atomName, atomType, coulombStyle)
+function Loop(
+    system,
+    totProps,
+    ovr_count,
+    box,
+    temperature,
+    total,
+    trans_moves,
+    rot_moves,
+    qq_q,
+    qq_r,
+    ewald,
+    averages,
+    ρ,
+    atomName,
+    atomType,
+    coulombStyle,
+)
     @assert system.r_cut < box / 2
     @assert ρ > 0.0
     @assert box > 0.0
@@ -456,7 +469,7 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
                 LLJ1 = partial_old_e
                 # calculates all short range ewald energies
                 if coulombStyle == "bare"
-                    partial_ewald_e,  overlap1 =
+                    partial_ewald_e, overlap1 =
                         CoulombReal(qq_r, qq_q, box, i, system)
                     reall1 = partial_ewald_e * ewald.factor
                     partial_old_e += partial_ewald_e * ewald.factor #+ total.recipOld
@@ -464,7 +477,7 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
 
                     partial_ewald_e, partial_ewald_v, overlap1 =
                         EwaldShort(i, system, ewald, box, qq_r, qq_q, false)      # qq_factor already included
-                        partial_old_v += partial_ewald_v #+ total.recipOld / 3.0
+                    partial_old_v += partial_ewald_v #+ total.recipOld / 3.0
                     reall1 = partial_ewald_e
                     partial_old_e += partial_ewald_e
                 end
@@ -481,9 +494,13 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
                 chose_move = rand()
 
                 if chose_move < probability_of_move["translation"]
-                # move particle
+                    # move particle
                     trans_moves.attempt += 1
-                    rnew = random_translate_vector(totProps.dr_max, system.rm[i], box)
+                    rnew = random_translate_vector(
+                        totProps.dr_max,
+                        system.rm[i],
+                        box,
+                    )
                     system.rm[i] = rnew
                     ei = totProps.quat[i]
                     ai = q_to_a(ei)
@@ -491,7 +508,10 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
                     rot_moves.attempt += 1
                     rnew = system.rm[i]
                     # rotate molecule and update atom positions
-                    ei = random_rotate_quaternion(totProps.dϕ_max, totProps.quat[i]) #quaternion()
+                    ei = random_rotate_quaternion(
+                        totProps.dϕ_max,
+                        totProps.quat[i],
+                    ) #quaternion()
                     ai = q_to_a(ei) # Rotation matrix for i
                 else
                     println("No move selected, exiting main.jl ~ line 490")
@@ -516,14 +536,14 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
                 LLJ2 = partial_new_e
                 # calculate new real contribution to ewalds
                 if coulombStyle == "bare"
-                    partial_ewald_e,  overlap2 =
-                    CoulombReal(qq_r, qq_q, box, i, system)
+                    partial_ewald_e, overlap2 =
+                        CoulombReal(qq_r, qq_q, box, i, system)
                     reall2 = partial_ewald_e * ewald.factor
                     partial_new_e += partial_ewald_e * ewald.factor
                 else
                     partial_ewald_e, partial_ewald_v, overlap2 =
                         EwaldShort(i, system, ewald, box, qq_r, qq_q, false)
-                        partial_new_v += partial_ewald_v
+                    partial_new_v += partial_ewald_v
                     reall2 = partial_ewald_e
                     partial_new_e += partial_ewald_e
                 end
@@ -536,14 +556,13 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
                 end
 
                 if overlap == false && coulombStyle != "bare" && Wolf != true
-                    deltaRecip, ewald =
-                        RecipMove(
-                            system,
-                            ewald,
-                            ra_old,
-                            ra_new,
-                            qq_q[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]],
-                        )
+                    deltaRecip, ewald = RecipMove(
+                        system,
+                        ewald,
+                        ra_old,
+                        ra_new,
+                        qq_q[system.thisMol_theseAtoms[i][1]:system.thisMol_theseAtoms[i][2]],
+                    )
                 else
                     deltaRecip = 0.0
                 end
@@ -556,7 +575,8 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
                 end
                 if Metropolis(delta / temperature) && overlap == false# make sure units work
                     total.energy += delta
-                    total.virial += (partial_new_v - partial_old_v) + deltaRecip / 3 # + recipEnergy / 3
+                    total.virial +=
+                        (partial_new_v - partial_old_v) + deltaRecip / 3 # + recipEnergy / 3
                     #total.recipOld = recipEnergy
                     #total.recip = recipEnergy
                     totProps.numTranAccepted += 1
@@ -604,11 +624,11 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
 
             end # i to nAtoms
             trans_moves.d_max = totProps.dr_max
-            trans_moves = Adjust!(trans_moves,box)
+            trans_moves = Adjust!(trans_moves, box)
             totProps.dr_max = trans_moves.d_max
 
             rot_moves.d_max = totProps.dϕ_max
-            rot_moves = Adjust_rot!(rot_moves,box)
+            rot_moves = Adjust_rot!(rot_moves, box)
             totProps.dϕ_max = rot_moves.d_max
 
             @assert qq_r == system.ra
@@ -624,17 +644,18 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
         #PrintPDB(qq_r, box, blk, "pdbOutput_qq")
         # Hella ugly output
         # TODO (BDK) modify to formatted output
-        line = @sprintf("Block: %4d, Energy: %8.2f, Ratio trans: %4.2f, dr_max: %4.2f, Ratio rot: %4.2f, dϕ_max: %4.2f, instant energy: %8.2f, overlap count: %4d, pressure: %8.2f",
-                        blk,
-                        averages.energy / totProps.totalStepsTaken / nMol,
-                        trans_moves.naccept / trans_moves.attempt,
-                        trans_moves.d_max,
-                        rot_moves.naccept / rot_moves.attempt,
-                        rot_moves.d_max,
-                        total.energy / nMol,
-                        ovr_count,
-                        4.60453 + total.virial / box / box / box
-                        )
+        line = @sprintf(
+            "Block: %4d, Energy: %8.2f, Ratio trans: %4.2f, dr_max: %4.2f, Ratio rot: %4.2f, dϕ_max: %4.2f, instant energy: %8.2f, overlap count: %4d, pressure: %8.2f",
+            blk,
+            averages.energy / totProps.totalStepsTaken / nMol,
+            trans_moves.naccept / trans_moves.attempt,
+            trans_moves.d_max,
+            rot_moves.naccept / rot_moves.attempt,
+            rot_moves.d_max,
+            total.energy / nMol,
+            ovr_count,
+            4.60453 + total.virial / box / box / box
+        )
         println(line)
 
         #println("box: ", box, "  density: ", ρ)
@@ -653,8 +674,24 @@ function Loop(system, totProps, ovr_count, box, temperature, total, trans_moves,
     end # blk to nblock
 end
 
-Loop(system, totProps, ovr_count, box, temperature, total, trans_moves, rot_moves,
-                qq_q, qq_r, ewald, averages, ρ, atomName, atomType, coulombStyle)
+Loop(
+    system,
+    totProps,
+    ovr_count,
+    box,
+    temperature,
+    total,
+    trans_moves,
+    rot_moves,
+    qq_q,
+    qq_r,
+    ewald,
+    averages,
+    ρ,
+    atomName,
+    atomType,
+    coulombStyle,
+)
 
 PrintOutput(
     system,
