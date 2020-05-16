@@ -13,7 +13,7 @@ This is my playground which will be used for testing new ideas and algorithms. A
   5) add ability to do adsorption
   
   # Proof of concept
-  Here are some mediocre images to show it works :)
+  Here are some mediocre images from short runs to show it works :)
 ![](Ewald/SPCE_W_E_.png)
 
 ![](Ewald/spce_box.png)
