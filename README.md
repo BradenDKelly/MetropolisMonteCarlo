@@ -14,6 +14,6 @@ This is my playground which will be used for testing new ideas and algorithms. A
   
   # Proof of concept
   Here are some mediocre images to show it works :)
-![](Ewald/SPCE_W_E.png)
+![](Ewald/SPCE_W_E_.png)
 
 ![](Ewald/spce_box.png)
