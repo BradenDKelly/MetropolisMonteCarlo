@@ -330,3 +330,24 @@ struct Numbers{I}
     molTypes::I
     charges::I
 end
+
+"""Struct for FF parameters (currently LJ and EXP6) """
+struct Tables #{T<:Vector} #<: ForceField
+    # passed two 1D arrays, convert them both to 2D matrices and
+    # apply geometric and arithmetic mixing rules
+    ϵᵢⱼ::Array{Float64,2}
+    σᵢⱼ::Array{Float64,2}
+    function Tables(a::Vector{T}, b::Vector{T}) where {T}
+        e = [sqrt(a[i] * a[j]) for i = 1:length(a), j = 1:length(a)]
+        s = [(b[i] + b[j]) / 2 for i = 1:length(b), j = 1:length(b)]
+        new(e, s)
+    end
+end
+
+"""
+function Tables(a::Vector{T}, b::Vector{T}) where T
+    e = [sqrt(a[i]*a[j]) for i=1:length(a), j=1:length(a)]
+    s = [(b[i] + b[j]) / 2 for i=1:length(b), j=1:length(b)]
+    return Tables(e,s)
+end
+"""

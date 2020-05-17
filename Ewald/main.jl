@@ -39,6 +39,7 @@ println(Dates.now())
 
 ################################################################################
 # TODO (BDK) Add in setup.jl and structs.jl
+# TODO (BDK) Make initial configuration generation w/ Topology struct
 # TODO (BDK) Implement pressure /w ewalds and wolf summation
 # TODO (BDK) Make functions in place so no temp arrays are generated
 # TODO (BDK) make input density in kg/m3 and convert
@@ -137,6 +138,105 @@ if lowercase(initialConfiguration) == "crystal"
         warnings,
         "hardcoded ϵ and σ for crystal to spc/e . Line 98, main.jl.",
     )
+    #=
+    what the deal is:
+    ----------------------
+        Generate center-of-mass coords as per a crystal
+        Assign random quaternion to each, and add in atoms
+
+    Outcome:
+    ---------------------
+    Have a starting structure and all parameters initialized
+    =#
+
+    moleculeList = []
+    bodyFixed = []
+
+    top_file = "topol.top"
+    specieList = ["mea.pdb","tip3p.pdb"]
+    @time systemTop = ReadTopFile(top_file) # returns struct FFParameters # located in Setup.jl
+
+    for i in eachindex(specieList)
+        push!( moleculeList,ReadPDB(specieList[i])  )  # get molecule info from pdb. Returns struct Topology # located in Setup.jl
+        temp = BodyFixed(moleculeList[i], systemTop)
+        tempCOM = Center_of_Mass(temp.r, temp.mass)
+        Shift_COM_to_Zero!(temp.r, tempCOM )
+
+        temp = BodyFixed(temp.r,temp.mass,temp.atype)
+        push!( bodyFixed,temp) #BodyFixed(moleculeList[i], systemTop) )  # get atom coords for quaternions # located in quaternions.jl
+    end
+
+function Initialize(systemTop::FFParameters,
+                    moleculeList,
+                    bodyFixed,
+                    box::T where T,
+                    simulation_name="default_sim_name"
+                    )
+
+    db = [coords.r for coords in bodyFixed]
+    molTypes = length(systemTop.molParams)
+    nMoless = sum( values(systemTop.molecules)) # number of molecules
+    nAtomss = sum( values(systemTop.molecules) .* [length(systemTop.molParams[i].atoms) for i=1:molTypes])
+
+    ρ = nMoless / box^3
+    # generate COM positions
+    rm = InitCubicGrid(nMoless, ρ)
+    ranList = randperm(nMoless)[1:nMoless]
+    println([values(systemTop.molecules)...][1])
+    initQuaternions = []
+    idx = 0
+    ra, resnr, resnm, atomnm, elem = [], [], [], [], []
+
+    for i=1:molTypes
+        for j = 1:([values(systemTop.molecules)...][i])
+            idx += 1
+            at_per_mol = length(systemTop.molParams[i].atoms)
+            #num = values(systemTop.molecules)[i]
+            #resnr = vcat(fill!(zeros(Int64,num),num))
+            temp_name = similar(moleculeList[i].resnr)
+            resnr = vcat(resnr,fill!(temp_name,idx)) #v
+            resnm = vcat(resnm,moleculeList[i].resnm)   #resnm,moleculeList[i].resnm)
+            atomnm = vcat(atomnm,moleculeList[i].atomnm)
+            elem = vcat(elem,moleculeList[i].elem)
+
+            ei = random_quaternion()
+            push!(initQuaternions, ei)
+            com = rm[ranList[idx]] # random COM coordinate
+            ai = q_to_a(ei) # Rotation matrix for i
+            for a = 1:at_per_mol # Loop over all atoms
+                # di(:,a) = MATMUL ( db(:,a), ai ) # NB: equivalent to ai_T*db, ai_T=transpose of ai
+                push!(ra, com + SVector(MATMUL(ai, db[i][a])))
+            end # End loop over all atoms
+        end
+    end
+    topology = Topology( simulation_name,
+                [box for i=1:3],
+                [SVector(r...) for r in ra],
+                atomnm,
+                resnm,
+                resnr,
+                elem
+                )
+    return topology, initQuaternions
+end
+
+
+topology, initQuaternions = Initialize(systemTop, moleculeList, bodyFixed,box)
+
+#println(topology)
+
+
+###########################################
+#      Main Data Structures !!
+##########################################
+soa, moa = MakeAtomArrays(systemTop,topology, "kmc")  # located in setup.jl
+#intraFF, vdwTable, qqTable, nonbonded_matrix, scaled_pairs = MakeTables(systemTop,atomsPDB) # located in Setup.jl
+@time PrintPDB(soa, topology.box, 333, "kmc_output")
+
+intraFF, vdwTable, nonbonded_matrix, scaled_pairs = MakeTables(systemTop,topology) #  qqTable, located in Setup.jl
+num_atom_types = length(systemTop.atomTypes)
+# this stucture holds information on the number of atoms, molecules, atom types, molecule types, charges
+num = Numbers(length(soa), length(moa), num_atom_types, length(systemTop.molParams), count(!iszero, soa.charge) )
     # make LJ table of values.
     σ_O = 0.316555789 * 10.0 # Å
     σ_H = 0.0 # nm

@@ -103,6 +103,29 @@ function PrintPDB(r, box, step = 1, filename = "pdbOutput")
     end
 end
 
+function PrintPDB(soa::StructArray, boxSize, step=1, filename="pdbOutput")
+    df = 1.0  # disctance conversion if needed to go from nm to Angstrom
+    open(filename * "_" * string(step) * ".pdb", "w") do file
+
+        line = @sprintf("%-7s %7.3f %7.3f %7.3f %30s \n","CRYST1", df * boxSize[1],
+               df * boxSize[2], df * boxSize[3], "90.00  90.00  90.00 P 1           1")
+        write(file,line)
+
+        for (i,atom) in enumerate(soa)
+
+            atomName = systemTop.atomTypes[soa.atype[i]].name
+            #atomName = systemTop.molParams[soa.molType[i]].atoms[soa.atype[i]].atomnm
+            #molName = systemTop.molParams[soa.molType[i]].atoms[soa.atype[i]].resnm
+            molName = systemTop.molParams[soa.molType[i]].name
+
+            line = @sprintf("%-6s %4d %3s %4s %5d %3s %7.3f %7.3f %7.3f %5.2f %5.2f \n",
+            "ATOM",i, atomName, molName, soa.molNum[i], " ", df * soa.coords[i][1],
+            df * soa.coords[i][2],df * soa.coords[i][3], 1.00, 0.00   )
+            write(file,line)
+        end
+    end
+end
+
 function PrintOutput(
     system::Requirements,
     totProps::Properties2,

@@ -36,15 +36,16 @@ function ReadPDB(pdbName)
     resnm = []
     resnr = []
     elem = []
+    df = 1.0  # factor from converting between Angstrom and nm
     #conect = [] # currently disabled
     open(pdbName) do file
         for line in eachline(file)
             if occursin("ATOM",line) || occursin("HETATM",line)
                 push!(coords,
                     [
-                    0.1*parse(Float64,line[31:38]),
-                    0.1*parse(Float64,line[40:46]),
-                    0.1*parse(Float64,line[48:55])
+                    df*parse(Float64,line[31:38]),
+                    df*parse(Float64,line[40:46]),
+                    df*parse(Float64,line[48:55])
                     ])
                 push!(atomnm,strip(line[12:15]))
                 push!(resnm,strip(line[17:21]))
@@ -55,7 +56,7 @@ function ReadPDB(pdbName)
                     push!(elem,"")
                 end
             elseif occursin("CRYST1",line)
-                box = 0.1*[parse(Float64,split(line)[2]),parse(Float64,split(line)[3]),
+                box = df*[parse(Float64,split(line)[2]),parse(Float64,split(line)[3]),
                     parse(Float64,split(line)[4]) ]
             #elseif occursin("CONECT",line)
             #    push!(conect,[parse(Int64,line[7:12]), parse(Int64,line[13:18]) ])
@@ -460,16 +461,19 @@ function MakeAtomArrays(systemTop::FFParameters,atomsPDB::Topology, mode::String
     yshift = 0.0
     zshift = 0.0
 
-    xshift = minimum([atomsPDB.r[i].x for i=1:length(atomsPDB.r)])
-    yshift = minimum([atomsPDB.r[i].y for i=1:length(atomsPDB.r)])
-    zshift = minimum([atomsPDB.r[i].z for i=1:length(atomsPDB.r)])
+    xshift = minimum([atomsPDB.r[i][1] for i=1:length(atomsPDB.r)])
+    yshift = minimum([atomsPDB.r[i][2] for i=1:length(atomsPDB.r)])
+    zshift = minimum([atomsPDB.r[i][3] for i=1:length(atomsPDB.r)])
 
     if xshift < 0.0 || yshift < 0.0 || zshift < 0.0
         println("X,Y,Z shifts to coords are: ", xshift, " ", yshift, " ", zshift)
 
         for i in 1:length(atomsPDB.r)
-            atomsPDB.r[i] = XYZ(atomsPDB.r[i].x + abs(xshift),
-                            atomsPDB.r[i].y + abs(yshift), atomsPDB.r[i].z + abs(zshift) )
+            #atomsPDB.r[i] = XYZ(atomsPDB.r[i].x + abs(xshift),
+            #                atomsPDB.r[i].y + abs(yshift), atomsPDB.r[i].z + abs(zshift) )
+            atomsPDB.r[i] =SVector(atomsPDB.r[i][1] + abs(xshift),
+                                   atomsPDB.r[i][2] + abs(yshift),
+                                   atomsPDB.r[i][3] + abs(zshift))
         end
     end
 
@@ -535,7 +539,9 @@ end # MakeAtomArrays
 
 function MakeTables(systemTop::FFParameters,atomsPDB::Topology)
     x = length(systemTop.atomTypes)
-
+    ϵ = [systemTop.atomTypes[i].ϵ for i=1:x]
+    σ = [systemTop.atomTypes[i].σ for i=1:x]
+    #=
     ϵ_ij = Array{Float64,2}(undef,x,x)
     σ_ij = Array{Float64,2}(undef,x,x)
     α_ij = Array{Float64,2}(undef,x,x)
@@ -560,6 +566,8 @@ function MakeTables(systemTop::FFParameters,atomsPDB::Topology)
     vdwTable = Tables([ϵ_ij[i,j] for i=1:size(ϵ_ij,1),j=1:size(ϵ_ij,1)],
                 [σ_ij[i,j] for i=1:size(σ_ij,1),j=1:size(σ_ij,1)]) #,
                 #[α_ij[i,j] for i=1:size(α_ij,1),j=1:size(α_ij,1)])
+    =#
+    vdwTable = Tables(ϵ, σ)
     push!(warnings,"Only epsilon and sigma have been defined, not alpha.")
 
     IntraBond = Bonds[]
@@ -655,7 +663,7 @@ function MakeTables(systemTop::FFParameters,atomsPDB::Topology)
         scaled_pairs[i] = SVector(scaled_pairListTemp[i]...)
     end
 
-    return intraFF, vdwTable, qqTable, nonbonded_matrix, scaled_pairs
+    return intraFF, vdwTable, nonbonded_matrix, scaled_pairs # qqTable
 end # end MakeTables
 
 function readNIST(filename)
