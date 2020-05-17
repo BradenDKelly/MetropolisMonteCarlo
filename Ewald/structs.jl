@@ -213,11 +213,42 @@ end
 mutable struct XYZ <: FieldVector{3, Float64}
     @xyz
 end
+
+struct BodyFixed{T}
+    r::Vector{SVector{3,T}}
+    mass::Vector{T}
+    atype::Vector{Int64}
+end
+
+function BodyFixed(m,systemTop)
+    # input: struct of type Topology (moleculeList)
+    # output: struct of type BodyFixed
+
+    # ASSUMPTIONS: Atom Centered Charges
+    natoms = length(m.r)             # number of atoms in molecule
+    mass = []
+    atype= []
+    for i=1:natoms
+        mol = FindMolType(String(m.resnm[i]),moleculeList )  # sort of rhetorical
+        atom = FindAtomInMol( String(m.atomnm[i]),mol )
+        atomTypeNumber = FindNumericAtomType(mol,atom,systemTop)
+        push!(mass, systemTop.molParams[mol].atoms[atom].mass)
+        push!(atype,atomTypeNumber)
+    end
+
+
+
+    return BodyFixed( [m.r[i] for i=1:natoms],
+                      [mass[i] for i=1:natoms ],
+                      [atype[i] for i=1:natoms] )
+
+end # BodyFixed
+
 "pdb information, could be an entire system or one molecule"
 struct Topology
     name::AbstractString
     box::Vector{Float64}
-    r::Vector{XYZ}
+    r::Vector{SVector{3,Float64}}
     atomnm::Vector{AbstractString}
     resnm::Vector{AbstractString}
     resnr::Vector{Int64}
@@ -270,7 +301,7 @@ struct Tables2 <: ForceField
     Tables2(ϵij=zeros(2,2), σij=zeros(2,2),αij=zeros(2,2)) = new(ϵij, σij,αij)
 end
 
-mutable struct Properties{F}
+mutable struct Properties22{F}
     volume::F
     temperature::F
     density::F

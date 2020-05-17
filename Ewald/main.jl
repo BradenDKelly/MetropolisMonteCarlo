@@ -24,6 +24,8 @@ include("ewalds.jl")
 include("constants.jl")
 include("banners.jl")
 include("adjust.jl")
+include("setup.jl")
+include("structs.jl")
 
 
 function PrintLine(s::String, n::Int64) # handy tool for outputting lines
@@ -36,6 +38,7 @@ start = Dates.now()
 println(Dates.now())
 
 ################################################################################
+# TODO (BDK) Add in setup.jl and structs.jl
 # TODO (BDK) Implement pressure /w ewalds and wolf summation
 # TODO (BDK) Make functions in place so no temp arrays are generated
 # TODO (BDK) make input density in kg/m3 and convert
@@ -87,6 +90,7 @@ defaults = Dict(
     "rho" => 0.75,
     "ϵ" => 1.0,
     "σ" => 1.0,
+    "mass" => [15.998, 1.008]
 )
 
 probability_of_move = Dict("translation" => 0.5, "rotation" => 0.5)
