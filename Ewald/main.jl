@@ -70,6 +70,11 @@ dϕ_max = 0.05
 coulombStyle = "ewald"
 Wolf = false
 
+if Wolf
+    println("This simulation uses Wolf Summation")
+else
+    println("This simulation uses Ewald Summation")
+end
 # Set default values, check keys and typeche ck values
 defaults = Dict(
     "nblock" => 10,
@@ -113,7 +118,7 @@ warnings = []
 # Shift COM of body-fixed reference molecules to [0,0,0]
 push!(
     warnings,
-    "Overwriting triatomic glass to spce body-fixed. line 184 tests.jl",
+    "Overwriting triatomic glass to spce body-fixed. line 120 tests.jl",
 )
 a = []
 push!(a, SVector(db[:, 1]...))
