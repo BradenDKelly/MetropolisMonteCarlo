@@ -860,7 +860,7 @@ function potential(
 
 end
 
-"""Calculate total potential energy using moa and soa"""
+"""Calculate total potential energy using moa and soa for WolfSummation"""
 function potential(
     moa::StructArray,
     soa::StructArray,
@@ -932,6 +932,95 @@ function potential(
                     dot(soa.charge,soa.charge)
     tot.energy += (prefactor - prefactor2)*ewald.factor
     tot.coulomb += (prefactor - prefactor2)*ewald.factor
+
+    println("total energy is: ", tot.energy)
+    println("total coulomb is: ", tot.coulomb)
+    println("total LJ energy is: ", tot.energy - tot.coulomb)
+
+
+    return tot
+
+end
+
+"""Calculate total potential energy using moa and soa for Ewald Summation"""
+function potential(
+    moa::StructArray,
+    soa::StructArray,
+    tot::Properties,
+    ewalds::EWALD,
+    vdwTable::Tables,
+    sim_props::Properties2,
+    coulomb_style::String #triggers wolf summations using double strings
+)
+
+    #tot = Properties(0.0,0.0)
+    ener, vir = 0.0, 0.0
+    r_cut = sim_props.LJ_rcut
+    #@assert r_cut == 10.0
+    box = sim_props.box
+    total.energy = 0.0
+    total.virial = 0.0
+    #########
+    #
+    #     Calculate LJ
+    #
+    ##################
+    LJ, real = 0.0, 0.0
+
+    #ener, vir = LJ_poly_ΔU(2, system) # turn on for timing
+
+    for i = 1:length(moa.COM)
+        ener, vir = LJ_poly_ΔU(i, moa, soa, vdwTable, r_cut, box)
+        tot.energy += ener
+        tot.virial += vir
+        LJ += ener
+    end
+    tot.energy = tot.energy / 2
+    tot.virial = tot.virial / 2
+    LJ = LJ / 2
+    println("Total LJ energy is: ", tot.energy)
+
+    #########
+    #
+    #     Calculate EWALD
+    #
+    ##################
+
+    # Real
+    totReal = 0.0
+    for i = 1:length(moa.COM)
+        ener, overlap =
+            #EwaldReal(qq_r, qq_q,ewald.kappa, box,thisMol_thisAtom, i, system)
+             EwaldReal(i, moa, soa, ewald,totProps.qq_rcut, box)
+        totReal += ener
+        if overlap
+            println("overlap after EwaldReal")
+            #exit()
+        end
+    end
+    totReal *= ewald.factor / 2
+    tot.energy += totReal   # divide by 2 to account for double counting
+    tot.coulomb += totReal
+    tot.virial += totReal / 3.0
+    reall = totReal
+    println("Coulomb contribution is: ", reall)
+
+    recipEnergy, ewalds = RecipLong(ewalds, soa.coords, soa.charge, box)  #RecipLong(system, ewald, qq_r, qq_q, kfacs)
+    recipEnergy *= ewalds.factor
+
+
+    println("Total recipricol Ewald is: ", recipEnergy)
+    tot.energy += recipEnergy   # divide by 2 to account for double counting
+    tot.coulomb += recipEnergy
+    tot.virial += recipEnergy / 3.0
+
+    selfEnergy = EwaldSelf(ewalds, soa.charge)
+    println("Self energy: ", selfEnergy)
+    tot.energy += selfEnergy
+    tot.coulomb += selfEnergy
+    tot.virial += selfEnergy / 3.0
+
+
 
     println("total energy is: ", tot.energy)
     println("total coulomb is: ", tot.coulomb)
