@@ -103,6 +103,83 @@ function PrintPDB(r, box, step = 1, filename = "pdbOutput")
     end
 end
 
+function Initialize(systemTop::FFParameters,
+                    moleculeList,
+                    bodyFixed,
+                    box::T where T,
+                    simulation_name="default_sim_name"
+                    )
+
+    db = [coords.r for coords in bodyFixed]
+    molTypes = length(systemTop.molParams)
+    nMoless = sum( values(systemTop.molecules)) # number of molecules
+    nAtomss = sum( values(systemTop.molecules) .* [length(systemTop.molParams[i].atoms) for i=1:molTypes])
+
+    ρ = nMoless / box^3
+    # generate COM positions
+    rm = InitCubicGrid(nMoless, ρ)
+    ranList = randperm(nMoless)[1:nMoless]
+    println([values(systemTop.molecules)...][1])
+    initQuaternions = []
+    idx = 0
+    ra, resnr, resnm, atomnm, elem = [], [], [], [], []
+
+    for i=1:molTypes
+        for j = 1:([values(systemTop.molecules)...][i])
+            idx += 1
+            at_per_mol = length(systemTop.molParams[i].atoms)
+            #num = values(systemTop.molecules)[i]
+            #resnr = vcat(fill!(zeros(Int64,num),num))
+            temp_name = similar(moleculeList[i].resnr)
+            resnr = vcat(resnr,fill!(temp_name,idx)) #v
+            resnm = vcat(resnm,moleculeList[i].resnm)   #resnm,moleculeList[i].resnm)
+            atomnm = vcat(atomnm,moleculeList[i].atomnm)
+            elem = vcat(elem,moleculeList[i].elem)
+
+            ei = random_quaternion()
+            push!(initQuaternions, ei)
+            com = rm[ranList[idx]] # random COM coordinate
+            ai = q_to_a(ei) # Rotation matrix for i
+            for a = 1:at_per_mol # Loop over all atoms
+                # di(:,a) = MATMUL ( db(:,a), ai ) # NB: equivalent to ai_T*db, ai_T=transpose of ai
+                push!(ra, com + SVector(MATMUL(ai, db[i][a])))
+            end # End loop over all atoms
+        end
+    end
+    topology = Topology( simulation_name,
+                [box for i=1:3],
+                [SVector(r...) for r in ra],
+                atomnm,
+                resnm,
+                resnr,
+                elem
+                )
+    return topology, [SVector(item...) for item in initQuaternions]
+end
+
+function PrintPDB(soa::StructArray, moa::StructArray, boxSize, step=1, filename="pdbOutput")
+    df = 1.0  # disctance conversion if needed to go from nm to Angstrom
+    open(filename * "_" * string(step) * ".pdb", "w") do file
+
+        line = @sprintf("%-7s %7.3f %7.3f %7.3f %30s \n","CRYST1", df * boxSize[1],
+               df * boxSize[2], df * boxSize[3], "90.00  90.00  90.00 P 1           1")
+        write(file,line)
+
+        for (i,atom) in enumerate(soa)
+
+            atomName = systemTop.atomTypes[soa.atype[i]].name
+            #atomName = systemTop.molParams[soa.molType[i]].atoms[soa.atype[i]].atomnm
+            #molName = systemTop.molParams[soa.molType[i]].atoms[soa.atype[i]].resnm
+            molName = systemTop.molParams[soa.molType[i]].name
+
+            line = @sprintf("%-6s %4d %3s %4s %5d %3s %7.3f %7.3f %7.3f %5.2f %5.2f \n",
+            "ATOM",i, atomName, molName, soa.molNum[i], " ", df * soa.coords[i][1],
+            df * soa.coords[i][2],df * soa.coords[i][3], 1.00, 0.00   )
+            write(file,line)
+        end
+    end
+end
+
 function PrintOutput(
     system::Requirements,
     totProps::Properties2,

@@ -288,9 +288,97 @@ function EwaldReal(
     return pot, overlap
 end
 
+##########################################
+
+function EwaldReal(chosenOne::Int64,
+                    moa::StructArray,
+                    soa::StructArray,
+                    ewald::EWALD,
+                    r_cut::Float64,
+                    box::Float64
+    )
+    ####
+    #
+    #    Some prep stuff
+    #
+    #############
+    ri = moa.COM[chosenOne]
+    start_a = moa.firstAtom[chosenOne]
+    end_a = moa.lastAtom[chosenOne]
+    rMol = moa.COM
+    #r_cut = 10.0
+    r_cut = r_cut
+    #@assert r_cut == 10.0
+    diameter = 0 #r_cut * 0.25  + 5.0#2.0 * sqrt( maximum( sum(db^2,dim=1) ) )
+    rm_cut_box = (r_cut + diameter)       # Molecular cutoff in box=1 units
+    rm_cut_box_sq = rm_cut_box^2              # squared
+    r_cut_sq = r_cut^2
+    #@assert r_cut_sq == 100.0
+    pot = float(0.0)
+    kappa = ewald.kappa
+    rab = SVector{3,Float64}(0.0, 0.0, 0.0)
+    rij = SVector{3,Float64}(0.0, 0.0, 0.0)
+    #ri = similar(rab)
+    rj = SVector{3,Float64}(0.0, 0.0, 0.0)
+    ra = SVector{3,Float64}(0.0, 0.0, 0.0)
+    rb = SVector{3,Float64}(0.0, 0.0, 0.0)
+
+    overlap = false
+    ovr = 0.5
+
+    @inbounds for (j, rj) in enumerate(rMol) # cycle through all molecules
+        if j == chosenOne # skip self interactions
+            continue
+        end
+
+        @inbounds for k = 1:3
+            rij = @set rij[k] = vector1D(ri[k], rj[k], box)
+        end
+
+        rij2 = rij[1] * rij[1] + rij[2] * rij[2] + rij[3] * rij[3]
+
+        if rij2 < rm_cut_box_sq
+
+            """Loop over all atoms in molecule A"""
+            for a = start_a:end_a
+                ra = soa.coords[a]
+                """Loop over all atoms in molecule B"""
+                #@inbounds for (b, rb) in enumerate(qq_r)
+                start_b = moa.firstAtom[j]
+                end_b = moa.lastAtom[j]
+                for b = start_b:end_b
+                    rb = soa.coords[b]
+                    #if b in start_a:end_a
+                    #    continue
+                    #end # keep mol i from self interacting
+                    @inbounds for k = 1:3
+                        rab = @set rab[k] = vector1D(ra[k], rb[k], box)
+                    end
+                    rab2 = rab[1] * rab[1] + rab[2] * rab[2] + rab[3] * rab[3]
+
+                    if (rab2 < ovr) && (soa.charge[a] * soa.charge[b] < 0)
+                        return 0.0, true
+
+                    elseif rab2 < (r_cut_sq + 100)
+                        # this uses only molecular cutoff, hence the +100
+                        # TODO remove this if statement
+                        rab_mag = sqrt(rab2)
+                        pot +=
+                            soa.charge[a] * soa.charge[b] * erfc(kappa * rab_mag) / rab_mag
+                    else
+                        pot += 0.0
+                    end # potential cutoff
+                end # loop over atom in molecule b
+            end # loop over atoms in molecule a
+        end # if statement for molecular cutoff
+    end # loop over molecules
+    return pot, overlap
+end
+
 
 #function RecipLong(boxSize, n, kappa, kfac, nk, k_sq_max, r, qq_q)
-""" Recipricol space Ewald energy """
+#=
+""" Recipricol space Ewald energy NOT USED"""
 function RecipLong(
     system::Requirements,
     ewald::EWALD,
@@ -372,7 +460,7 @@ function RecipLong(
     #energy *= qq #/ L
     return energy
 end # function
-
+=#
 """ Recipricol space Ewald energy parallel and molecular version"""
 function RecipLong(
     system::Requirements,
@@ -446,7 +534,77 @@ function RecipLong(
 end # function
 
 
-""" Recipricol space Ewald energy Move"""
+""" Recipricol space Ewald energy parallel and molecular version"""
+function RecipLong(
+    ewald::EWALD,
+    r::Vector{SVector{3,Float64}},
+    qq_q::Vector{Float64},
+    box::Float64
+)
+""" Recipricol used with moa and soa"""
+
+    kxyz = ewald.kxyz[:]
+    energy = 0.0
+    L = box
+    twopi = 2.0 * π
+    nk = ewald.nk
+    n = length(r)
+    k_sq_max = ewald.k_sq_max
+
+    eikx = OffsetArray{Complex{Float64}}(undef, 1:n, 0:nk) #SArray{n,nk+2}([0.0 + 0.0*im for i=1:n for j=1:(nk+2) ]...)   #undef,n,nk+2)
+    eiky = OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk) #zeros(ComplexF64,n,2*nk+2) #SArray{n,2*nk+2}([0.0 + 0.0*im for i=1:n for j=1:(2*nk+2) ]...)  #(undef,n,2*nk+2)
+    eikz = OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk)
+
+    for j = 1:n
+        # calculate kx,ky,kz =1,2 explicitly
+        eikx[j, 0] = 1.0 + 0.0 * im
+        eiky[j, 0] = 1.0 + 0.0 * im
+        eikz[j, 0] = 1.0 + 0.0 * im
+
+        eikx[j, 1] =
+            cos(twopi * (r[j][1]) / L) + sin(twopi * (r[j][1]) / L) * im
+        eiky[j, 1] =
+            cos(twopi * (r[j][2]) / L) + sin(twopi * (r[j][2]) / L) * im
+        eikz[j, 1] =
+            cos(twopi * (r[j][3]) / L) + sin(twopi * (r[j][3]) / L) * im
+
+        eiky[j, -1] = conj(eiky[j, 1])
+        eikz[j, -1] = conj(eikz[j, 1])
+    end
+    # calculate remaining positive kx, ky, kz by recurrence
+    for k = 2:(nk)
+        for j = 1:n
+            eikx[j, k] = eikx[j, k-1] * eikx[j, 1]
+            eiky[j, k] = eiky[j, k-1] * eiky[j, 1]
+            eikz[j, k] = eikz[j, k-1] * eikz[j, 1]
+
+            #eikx[j,-k] = conj( eikx[j,k] )
+            eiky[j, -k] = conj(eiky[j, k])
+            eikz[j, -k] = conj(eikz[j, k])
+        end
+    end
+    # TODO This can be sped up. It is generating too many temp Arrays
+    # It should be faster if devectorized, but that makes even more temp arrays
+    term = 0.0 + 0.0 * im
+    for i = 1:length(ewald.cfac)
+        term = 0.0 + 0.0 * im
+        for l = 1:n
+            term +=
+                qq_q[l] *
+                eikx[l, kxyz[i][1]] *
+                eiky[l, kxyz[i][2]] *
+                eikz[l, kxyz[i][3]]#* eiky[l,kxyz[i][2]] * eikz[l,kxyz[i][3]]
+        end
+        #term = sum( qq_q[:] .* eikx[:,kxyz[i][1]] .* eiky[:,kxyz[i][2]] .* eikz[:,kxyz[i][3]] )
+        energy += ewald.cfac[i] * real(conj(term) * term)
+        ewald.sumQExpNew[i] = term
+        ewald.sumQExpOld[i] = term
+    end
+    return energy, ewald
+end # function
+
+#=
+""" Recipricol space Ewald energy Move older style, now used"""
 function RecipMove(
     system::Requirements,
     ewalds::EWALD,
@@ -556,6 +714,117 @@ function RecipMove(
     #
     return energy * ewalds.factor, ewalds
 end # function Recipricol Move
+=#
+function RecipMove(
+    box::Float64,
+    ewalds::EWALD,
+    r_old::Vector,
+    r_new::Vector,
+    qq_q::Vector,
+)
+    #=
+    Intended to calculate the recipricol for the molecule that was moved, not then
+    entire system.
+
+    This is twice as long as it should be.
+    It calculates the fourier contibution for both old and new positions.
+    TODO store old contributions
+    =#
+    #cfac = ewald.cfac
+    kxyz = ewalds.kxyz[:]
+    energy = float(0.0)
+    L = box
+    twopi = 2.0 * π
+    nk = ewalds.nk
+    n = length(r_old)
+    @assert n == 3
+    k_sq_max = ewalds.k_sq_max
+    @assert k_sq_max == 27
+    @assert nk == 5
+
+    eikx_n = OffsetArray{Complex{Float64}}(undef, 1:n, 0:nk) #SArray{n,nk+2}([0.0 + 0.0*im for i=1:n for j=1:(nk+2) ]...)   #undef,n,nk+2)
+    eiky_n = OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk) #zeros(ComplexF64,n,2*nk+2) #SArray{n,2*nk+2}([0.0 + 0.0*im for i=1:n for j=1:(2*nk+2) ]...)  #(undef,n,2*nk+2)
+
+    eikz_n = OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk) #similar(eiky_n) #  OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk)
+    eikx_o = OffsetArray{Complex{Float64}}(undef, 1:n, 0:nk) #similar(eikx_n) #  OffsetArray{Complex{Float64}}(undef, 1:n, 0:nk) #SArray{n,nk+2}([0.0 + 0.0*im for i=1:n for j=1:(nk+2) ]...)   #undef,n,nk+2)
+    eiky_o = OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk) #similar(eiky_n) # OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk) #zeros(ComplexF64,n,2*nk+2) #SArray{n,2*nk+2}([0.0 + 0.0*im for i=1:n for j=1:(2*nk+2) ]...)  #(undef,n,2*nk+2)
+    eikz_o = OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk) #similar(eiky_n) # OffsetArray{Complex{Float64}}(undef, 1:n, -nk:nk)
+
+    for j = 1:n
+        # calculate kx,ky,kz =1,2 explicitly
+        eikx_n[j, 0] = 1.0 + 0.0 * im
+        eiky_n[j, 0] = 1.0 + 0.0 * im
+        eikz_n[j, 0] = 1.0 + 0.0 * im
+        eikx_o[j, 0] = 1.0 + 0.0 * im
+        eiky_o[j, 0] = 1.0 + 0.0 * im
+        eikz_o[j, 0] = 1.0 + 0.0 * im
+
+        eikx_n[j, 1] =
+            cos(twopi * (r_new[j][1]) / L) + sin(twopi * (r_new[j][1]) / L) * im
+        eiky_n[j, 1] =
+            cos(twopi * (r_new[j][2]) / L) + sin(twopi * (r_new[j][2]) / L) * im
+        eikz_n[j, 1] =
+            cos(twopi * (r_new[j][3]) / L) + sin(twopi * (r_new[j][3]) / L) * im
+        eikx_o[j, 1] =
+            cos(twopi * (r_old[j][1]) / L) + sin(twopi * (r_old[j][1]) / L) * im
+        eiky_o[j, 1] =
+            cos(twopi * (r_old[j][2]) / L) + sin(twopi * (r_old[j][2]) / L) * im
+        eikz_o[j, 1] =
+            cos(twopi * (r_old[j][3]) / L) + sin(twopi * (r_old[j][3]) / L) * im
+
+        eiky_n[j, -1] = conj(eiky_n[j, 1])
+        eikz_n[j, -1] = conj(eikz_n[j, 1])
+        eiky_o[j, -1] = conj(eiky_o[j, 1])
+        eikz_o[j, -1] = conj(eikz_o[j, 1])
+    end
+    # calculate remaining positive kx, ky, kz by recurrence
+    for k = 2:(nk)
+        for j = 1:n
+            eikx_n[j, k] = eikx_n[j, k-1] * eikx_n[j, 1]
+            eiky_n[j, k] = eiky_n[j, k-1] * eiky_n[j, 1]
+            eikz_n[j, k] = eikz_n[j, k-1] * eikz_n[j, 1]
+            eikx_o[j, k] = eikx_o[j, k-1] * eikx_o[j, 1]
+            eiky_o[j, k] = eiky_o[j, k-1] * eiky_o[j, 1]
+            eikz_o[j, k] = eikz_o[j, k-1] * eikz_o[j, 1]
+
+            #eikx[j,-k] = conj( eikx[j,k] )
+            eiky_n[j, -k] = conj(eiky_n[j, k])
+            eikz_n[j, -k] = conj(eikz_n[j, k])
+            eiky_o[j, -k] = conj(eiky_o[j, k])
+            eikz_o[j, -k] = conj(eikz_o[j, k])
+        end
+    end
+    # TODO This can be sped up. It is generating too many temp Arrays
+    # It should be faster if devectorized, but that makes even more temp arrays
+    # TODO can probably vectorize better if I swap i and l loops.
+
+    # Calculate difference between the twopi
+
+    for i = 1:length(ewalds.cfac)
+        for l = 1:n
+            ewalds.sumQExpNew[i] +=
+                qq_q[l] * (
+                    eikx_n[l, kxyz[i][1]] *
+                    eiky_n[l, kxyz[i][2]] *
+                    eikz_n[l, kxyz[i][3]] -
+                    eikx_o[l, kxyz[i][1]] *
+                    eiky_o[l, kxyz[i][2]] *
+                    eikz_o[l, kxyz[i][3]]
+                )
+        end
+
+
+        energy +=
+            ewalds.cfac[i] * (
+                real(conj(ewalds.sumQExpNew[i]) * ewalds.sumQExpNew[i]) -
+                real(conj(ewalds.sumQExpOld[i]) * ewalds.sumQExpOld[i])
+            )
+    end
+
+    #
+    return energy * ewalds.factor, ewalds
+end # function Recipricol Move
+
 
 function EwaldSelf(ewald::EWALD, qq_q::Vector)
     kappa = ewald.kappa
@@ -615,5 +884,27 @@ function EwaldShort(
         partial_e += (tfb / 3)
     end
     =#
+    return partial_e, partial_v, overlap
+end
+
+"""Calculates real, self and tinfoil contributions to Coulombic energy for
+a single molecule interacting with the rest of the system"""
+function EwaldShort(
+    i::Int64,
+    moa::StructArray,
+    soa::StructArray,
+    sim_props::Properties2,
+    ewald::EWALD,
+    box::Float64,
+)
+    partial_e = 0.0
+    partial_v = 0.0
+    overlap = false
+    # Calculate new ewald REAL energy
+    realEwald, overlap = EwaldReal(i, moa, soa, ewald,sim_props.qq_rcut, box)
+    realEwald *= ewald.factor
+    partial_e += realEwald
+    partial_v += (realEwald / 3)
+
     return partial_e, partial_v, overlap
 end

@@ -204,6 +204,91 @@ function LJ_poly_ΔU(i::Int, system::Requirements)
 
     return pot * 4, vir * 24 / 3.0
 end # lj_poly_ΔU
+################################################################################
+"""polyatomic LJ with mos and soa"""
+function LJ_poly_ΔU(i, moa::StructArray, soa::StructArray,
+                            vdwTable, r_cut, box)
+    # Calculates Lennard-Jones energy of 1 particle, "i", interacting with the
+    # other N-1 particles in the system
+    # input:  i, Requirements (A struct with ϵ, σ, r_cut,, box and r)    #
+    # output  energy, virial both scalars
+
+    ri = moa.COM[i]   # molecule i
+    rMol = moa.COM    # all molecules
+
+    startAtom = moa.firstAtom[i] # first atom in molecule i
+    endAtom = moa.lastAtom[i]    # lastatom in molecule i
+    list_type = soa.atype
+    moli_type = soa.atype[startAtom:endAtom]
+
+    sFs, sFe = moa.firstAtom, moa.lastAtom
+
+    ra = soa.coords[startAtom:endAtom]
+    rb = soa.coords
+
+    table = vdwTable
+    box = box
+    r_cut = r_cut
+    diameter = 0 #r_cut * 0.25 + 5 #2.0 * sqrt( maximum( sum(db^2,dim=1) ) )
+    rm_cut_box = (r_cut + diameter)       # Molecular cutoff in box=1 units
+    rm_cut_box_sq = rm_cut_box^2              # squared
+    r_cut_sq = r_cut^2                   # Potential cutoff squared in sigma=1 units
+
+    rᵢⱼ = rab = SVector{3}(0.0, 0.0, 0.0)
+
+    pot, vir = 0.0, 0.0
+
+    # cycle through all molecules
+     for (j, rj) in enumerate(rMol)
+        if j == i
+            continue # skip if molecule j is same as i
+        end
+
+        """Molecular mirror image separation"""
+        @inbounds for k = 1:3
+            rᵢⱼ = @set rᵢⱼ[k] = vector1D(ri[k], rj[k], box)
+        end
+
+        rᵢⱼ² = rᵢⱼ[1] * rᵢⱼ[1] + rᵢⱼ[2] * rᵢⱼ[2] + rᵢⱼ[3] * rᵢⱼ[3]
+
+        if rᵢⱼ² < rm_cut_box_sq
+
+            """Loop over all atoms in molecule A"""
+             for a = 1:(endAtom-startAtom+1)
+
+                """Loop over all atoms in molecule B"""
+                for b = sFs[j]:sFe[j]
+
+                    """Atomic mirror image separation"""
+                    @inbounds for k = 1:3
+                        rab = @set rab[k] = vector1D(ra[a][k], rb[b][k], box)
+                    end
+
+                    rab² = rab[1] * rab[1] + rab[2] * rab[2] + rab[3] * rab[3]
+
+                    ϵᵢⱼ = table.ϵᵢⱼ[moli_type[a], list_type[b]]
+                    if rab² < (r_cut_sq + 100) && ϵᵢⱼ > 0.001
+                        # this uses only molecular cutoff
+
+                        σᵢⱼ = table.σᵢⱼ[moli_type[a], list_type[b]]
+
+                        σ² = σᵢⱼ^2 / rab²             # (sigma/rab)**2
+                        σ⁶ = σ²^3
+                        σ¹² = σ⁶^2
+                        pot += ϵᵢⱼ * (σ¹² - σ⁶)
+                        virab = ϵᵢⱼ * (2.0 * σ¹² - σ⁶)
+                        fab = rab * virab * σ²
+                        vir += dot(rᵢⱼ, fab)
+
+                    end # potential cutoff
+                end # loop over atom in molecule b
+            end # loop over atoms in molecule a
+        end
+    end
+
+    return pot * 4, vir * 24 / 3.0
+end # lj_poly_ΔU
+
 
 """ Calculates LJ potential between particle 'i' and the other N-1 particles"""
 function LJ_ΔU(i::Int, system::Requirements)
@@ -765,6 +850,177 @@ function potential(
                     dot(qq_q,qq_q)
     tot.energy += (prefactor - prefactor2)*ewald.factor
     tot.coulomb += (prefactor - prefactor2)*ewald.factor
+
+    println("total energy is: ", tot.energy)
+    println("total coulomb is: ", tot.coulomb)
+    println("total LJ energy is: ", tot.energy - tot.coulomb)
+
+
+    return tot
+
+end
+
+"""Calculate total potential energy using moa and soa for WolfSummation"""
+function potential(
+    moa::StructArray,
+    soa::StructArray,
+    tot::Properties,
+    ewald::EWALD,
+    vdwTable::Tables,
+    sim_props::Properties2#triggers wolf summations using double strings
+)
+
+    #tot = Properties(0.0,0.0)
+    ener, vir = 0.0, 0.0
+    r_cut = sim_props.LJ_rcut
+    #@assert r_cut == 10.0
+    box = sim_props.box
+    total.energy = 0.0
+    total.virial = 0.0
+    #########
+    #
+    #     Calculate LJ
+    #
+    ##################
+    LJ, real = 0.0, 0.0
+
+    #ener, vir = LJ_poly_ΔU(2, system) # turn on for timing
+
+    for i = 1:length(moa.COM)
+        ener, vir = LJ_poly_ΔU(i, moa, soa, vdwTable, r_cut, box)
+        tot.energy += ener
+        tot.virial += vir
+        LJ += ener
+    end
+    tot.energy = tot.energy / 2
+    tot.virial = tot.virial / 2
+    LJ = LJ / 2
+    println("Total LJ energy is: ", tot.energy)
+
+    #########
+    #
+    #     Calculate EWALD
+    #
+    ##################
+
+    # Real
+    totReal = 0.0
+    for i = 1:length(moa.COM)
+        ener, overlap =
+            #EwaldReal(qq_r, qq_q,ewald.kappa, box,thisMol_thisAtom, i, system)
+             EwaldReal(i, moa, soa, ewald,totProps.qq_rcut, box)
+        totReal += ener
+        if overlap
+            println("overlap after EwaldReal")
+            #exit()
+        end
+    end
+    totReal *= ewald.factor / 2
+    tot.energy += totReal   # divide by 2 to account for double counting
+    tot.coulomb += totReal
+    reall = totReal
+    println("Coulomb contribution is: ", reall)
+
+    prefactor = 0.0
+    for i=1:length(soa.charge)
+        for j=1:length(soa.charge)
+            prefactor += soa.charge[i]*soa.charge[j] * erfc(ewald.kappa*r_cut) / r_cut
+        end
+    end
+    prefactor *= -1
+    prefactor2 = (erfc(ewald.kappa*r_cut) / 2 / r_cut +ewald.kappa / sqrt(π) ) *
+                    dot(soa.charge,soa.charge)
+    tot.energy += (prefactor - prefactor2)*ewald.factor
+    tot.coulomb += (prefactor - prefactor2)*ewald.factor
+
+    println("total energy is: ", tot.energy)
+    println("total coulomb is: ", tot.coulomb)
+    println("total LJ energy is: ", tot.energy - tot.coulomb)
+
+
+    return tot
+
+end
+
+"""Calculate total potential energy using moa and soa for Ewald Summation"""
+function potential(
+    moa::StructArray,
+    soa::StructArray,
+    tot::Properties,
+    ewalds::EWALD,
+    vdwTable::Tables,
+    sim_props::Properties2,
+    coulomb_style::String #triggers wolf summations using double strings
+)
+
+    #tot = Properties(0.0,0.0)
+    ener, vir = 0.0, 0.0
+    r_cut = sim_props.LJ_rcut
+    #@assert r_cut == 10.0
+    box = sim_props.box
+    total.energy = 0.0
+    total.virial = 0.0
+    #########
+    #
+    #     Calculate LJ
+    #
+    ##################
+    LJ, real = 0.0, 0.0
+
+    #ener, vir = LJ_poly_ΔU(2, system) # turn on for timing
+
+    for i = 1:length(moa.COM)
+        ener, vir = LJ_poly_ΔU(i, moa, soa, vdwTable, r_cut, box)
+        tot.energy += ener
+        tot.virial += vir
+        LJ += ener
+    end
+    tot.energy = tot.energy / 2
+    tot.virial = tot.virial / 2
+    LJ = LJ / 2
+    println("Total LJ energy is: ", tot.energy)
+
+    #########
+    #
+    #     Calculate EWALD
+    #
+    ##################
+
+    # Real
+    totReal = 0.0
+    for i = 1:length(moa.COM)
+        ener, overlap =
+            #EwaldReal(qq_r, qq_q,ewald.kappa, box,thisMol_thisAtom, i, system)
+             EwaldReal(i, moa, soa, ewald,totProps.qq_rcut, box)
+        totReal += ener
+        if overlap
+            println("overlap after EwaldReal")
+            #exit()
+        end
+    end
+    totReal *= ewald.factor / 2
+    tot.energy += totReal   # divide by 2 to account for double counting
+    tot.coulomb += totReal
+    tot.virial += totReal / 3.0
+    reall = totReal
+    println("Coulomb contribution is: ", reall)
+
+    recipEnergy, ewalds = RecipLong(ewalds, soa.coords, soa.charge, box)  #RecipLong(system, ewald, qq_r, qq_q, kfacs)
+    recipEnergy *= ewalds.factor
+
+
+    println("Total recipricol Ewald is: ", recipEnergy)
+    tot.energy += recipEnergy   # divide by 2 to account for double counting
+    tot.coulomb += recipEnergy
+    tot.virial += recipEnergy / 3.0
+
+    selfEnergy = EwaldSelf(ewalds, soa.charge)
+    println("Self energy: ", selfEnergy)
+    tot.energy += selfEnergy
+    tot.coulomb += selfEnergy
+    tot.virial += selfEnergy / 3.0
+
+
 
     println("total energy is: ", tot.energy)
     println("total coulomb is: ", tot.coulomb)

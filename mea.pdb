@@ -1,0 +1,17 @@
+TITLE     MEA GRO FILE
+REMARK    THIS IS A SIMULATION BOX
+CRYST1   28.650   28.930   38.180  90.00  90.00  90.00 P 1           1
+MODEL        1
+ATOM      1  O2  MEA     1     21.7590 20.9820 22.7030  1.00  0.00       MEA O
+ATOM      2  H1  MEA     1     22.5130 20.6650 22.2180  1.00  0.00       MEA H
+ATOM      3  C1  MEA     1     20.5510 20.7470 21.9710  1.00  0.00       MEA C
+ATOM      4  H2  MEA     1     20.4180 19.6660 21.8050  1.00  0.00       MEA H
+ATOM      5  H3  MEA     1     19.7030 21.1260 22.5600  1.00  0.00       MEA H
+ATOM      6  C2  MEA     1     20.6030 21.4860 20.6170  1.00  0.00       MEA C
+ATOM      7  H4  MEA     1     20.7670 22.5590 20.8020  1.00  0.00       MEA H
+ATOM      8  H5  MEA     1     19.6480 21.3530 20.0860  1.00  0.00       MEA H
+ATOM      9  N1  MEA     1     21.7050 20.9580 19.7950  1.00  0.00       MEA N
+ATOM     10  H6  MEA     1     21.5150 19.9240 19.5470  1.00  0.00       MEA H
+ATOM     11  H7  MEA     1     21.7900 21.5350 18.8850  1.00  0.00       MEA H
+TER
+ENDMDL

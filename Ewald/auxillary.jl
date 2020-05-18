@@ -5,6 +5,8 @@
 ##########
 using StaticArrays
 
+include("structs.jl")
+
 abstract type ForceField end
 abstract type Gromacs <: ForceField end
 abstract type GAFF <: ForceField end
@@ -52,28 +54,6 @@ mutable struct Moves
     d_max::Float64
 end
 
-
-"""Struct for FF parameters (currently LJ and EXP6) """
-struct Tables #{T<:Vector} #<: ForceField
-    # passed two 1D arrays, convert them both to 2D matrices and
-    # apply geometric and arithmetic mixing rules
-    ϵᵢⱼ::Array{Float64,2}
-    σᵢⱼ::Array{Float64,2}
-    function Tables(a::Vector{T}, b::Vector{T}) where {T}
-        e = [sqrt(a[i] * a[j]) for i = 1:length(a), j = 1:length(a)]
-        s = [(b[i] + b[j]) / 2 for i = 1:length(b), j = 1:length(b)]
-        new(e, s)
-    end
-end
-
-"""
-function Tables(a::Vector{T}, b::Vector{T}) where T
-    e = [sqrt(a[i]*a[j]) for i=1:length(a), j=1:length(a)]
-    s = [(b[i] + b[j]) / 2 for i=1:length(b), j=1:length(b)]
-    return Tables(e,s)
-end
-"""
-
 """structure for energy calculation properties """
 
 mutable struct Requirements
@@ -105,6 +85,9 @@ mutable struct Properties2
     numTranAccepted::Int
     totalStepsTaken::Int
     quat::Vector{SVector{4,Float64}}
+    LJ_rcut::Float64
+    qq_rcut::Float64
+    box::Float64
 end
 
 
@@ -174,3 +157,47 @@ function MATMUL(ai, db)
     # Out: SVector{3}
     return SVector(dot(db, ai[:, 1]), dot(db, ai[:, 2]), dot(db, ai[:, 3]))
 end
+
+# TODO REmove duplicate COM and shift
+
+"Calculates the Center of Mass of a molecule"
+function Center_of_Mass( atom_coords, mol_mass) #result (COM)
+#!============================================================================================================
+
+ denominator = 0.0       #! sum of atom masses
+ numerator = zeros(3)         #! weighted sum of atom masses and positions
+
+for i = 1:length(mol_mass)
+	numerator .+=  atom_coords[i] * mol_mass[i]
+	denominator += mol_mass[i]
+
+end
+
+return SVector(numerator / denominator...)
+
+end #Center_of_Mass
+#!=============================
+
+#!============================================================================================================
+function Shift_COM_to_Zero!( atm_coords,COM )
+
+#!============================================================================================================
+
+# real, dimension(3), intent(in)                         			:: COM
+# integer, intent(in)                                    			:: Atoms_in_molecule
+# real, intent(inout), dimension(3,atoms_in_molecule)    			:: atm_coords							!atm = atom, qq = charge
+# integer                                                			:: i
+#!-----------------------------------------------------------------------------------------------------------
+
+#! This is meant to take the body fixed coordinates of the atoms for a molecule and shift them so that the center of mass is at zero. This is necessary for proper rotation of the molecule.
+#! This should only be called at the start of the run after getting *.pdb file coordinates.
+
+for i = 1:length(atm_coords)
+
+    atm_coords[i] = SVector(atm_coords[i] .- COM[:])
+
+end
+
+return nothing
+
+end #Shift_COM_to_Zero
