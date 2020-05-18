@@ -279,13 +279,14 @@ struct ParticleAtom{T,P} <: TypeStructArray
     qq::T
 end
 
-struct ParticleAtomKMC{F,I} <: TypeStructArray
-    molNum::I
-    molType::I
-    atype::I
-    mass::F
-    coords::SVector{3,F}
-    charge::F
+"""Atomic properties like number, mass, coords, charge, molecule_parent"""
+struct ParticleAtomKMC <: TypeStructArray
+    molNum::Int64
+    molType::Int64
+    atype::Int64
+    mass::Float64
+    coords::SVector{3,Float64}
+    charge::Float64
 end
 
 struct IntraForceField <: ForceField
@@ -310,12 +311,13 @@ mutable struct Properties22{F}
     PE::F
 end
 
-struct Molecule{F,I}
-    firstAtom::I
-    lastAtom::I
-    COM::SVector{3,F}
-    weight::F
-    molType::I
+struct Molecule
+    firstAtom::Int64
+    lastAtom::Int64
+    COM::SVector{3,Float64}
+    quat::SVector{4,Float64}
+    weight::Float64
+    molType::Int64
 end
 
 struct OverFlowTable{T}
@@ -332,7 +334,7 @@ struct Numbers{I}
 end
 
 """Struct for FF parameters (currently LJ and EXP6) """
-struct Tables #{T<:Vector} #<: ForceField
+mutable struct Tables #{T<:Vector} #<: ForceField
     # passed two 1D arrays, convert them both to 2D matrices and
     # apply geometric and arithmetic mixing rules
     ϵᵢⱼ::Array{Float64,2}

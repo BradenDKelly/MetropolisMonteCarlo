@@ -288,6 +288,93 @@ function EwaldReal(
     return pot, overlap
 end
 
+##########################################
+
+function EwaldReal(chosenOne::Int64,
+                    moa::StructArray,
+                    soa::StructArray,
+                    ewald::EWALD,
+                    r_cut::Float64,
+                    box::Float64
+    )
+    ####
+    #
+    #    Some prep stuff
+    #
+    #############
+    ri = moa.COM[chosenOne]
+    start_a = moa.firstAtom[chosenOne]
+    end_a = moa.lastAtom[chosenOne]
+    rMol = moa.COM
+    #r_cut = 10.0
+    r_cut = r_cut
+    #@assert r_cut == 10.0
+    diameter = 0 #r_cut * 0.25  + 5.0#2.0 * sqrt( maximum( sum(db^2,dim=1) ) )
+    rm_cut_box = (r_cut + diameter)       # Molecular cutoff in box=1 units
+    rm_cut_box_sq = rm_cut_box^2              # squared
+    r_cut_sq = r_cut^2
+    #@assert r_cut_sq == 100.0
+    pot = float(0.0)
+    kappa = ewald.kappa
+    rab = SVector{3,Float64}(0.0, 0.0, 0.0)
+    rij = SVector{3,Float64}(0.0, 0.0, 0.0)
+    #ri = similar(rab)
+    rj = SVector{3,Float64}(0.0, 0.0, 0.0)
+    ra = SVector{3,Float64}(0.0, 0.0, 0.0)
+    rb = SVector{3,Float64}(0.0, 0.0, 0.0)
+
+    overlap = false
+    ovr = 0.5
+
+    @inbounds for (j, rj) in enumerate(rMol) # cycle through all molecules
+        if j == chosenOne # skip self interactions
+            continue
+        end
+
+        @inbounds for k = 1:3
+            rij = @set rij[k] = vector1D(ri[k], rj[k], box)
+        end
+
+        rij2 = rij[1] * rij[1] + rij[2] * rij[2] + rij[3] * rij[3]
+
+        if rij2 < rm_cut_box_sq
+
+            """Loop over all atoms in molecule A"""
+            for a = start_a:end_a
+                ra = soa.coords[a]
+                """Loop over all atoms in molecule B"""
+                #@inbounds for (b, rb) in enumerate(qq_r)
+                start_b = moa.firstAtom[j]
+                end_b = moa.lastAtom[j]
+                for b = start_b:end_b
+                    rb = soa.coords[b]
+                    #if b in start_a:end_a
+                    #    continue
+                    #end # keep mol i from self interacting
+                    @inbounds for k = 1:3
+                        rab = @set rab[k] = vector1D(ra[k], rb[k], box)
+                    end
+                    rab2 = rab[1] * rab[1] + rab[2] * rab[2] + rab[3] * rab[3]
+
+                    if (rab2 < ovr) && (soa.charge[a] * soa.charge[b] < 0)
+                        return 0.0, true
+
+                    elseif rab2 < (r_cut_sq + 100)
+                        # this uses only molecular cutoff, hence the +100
+                        # TODO remove this if statement
+                        rab_mag = sqrt(rab2)
+                        pot +=
+                            soa.charge[a] * soa.charge[b] * erfc(kappa * rab_mag) / rab_mag
+                    else
+                        pot += 0.0
+                    end # potential cutoff
+                end # loop over atom in molecule b
+            end # loop over atoms in molecule a
+        end # if statement for molecular cutoff
+    end # loop over molecules
+    return pot, overlap
+end
+
 
 #function RecipLong(boxSize, n, kappa, kfac, nk, k_sq_max, r, qq_q)
 """ Recipricol space Ewald energy """
@@ -615,5 +702,27 @@ function EwaldShort(
         partial_e += (tfb / 3)
     end
     =#
+    return partial_e, partial_v, overlap
+end
+
+"""Calculates real, self and tinfoil contributions to Coulombic energy for
+a single molecule interacting with the rest of the system"""
+function EwaldShort(
+    i::Int64,
+    moa::StructArray,
+    soa::StructArray,
+    sim_props::Properties2,
+    ewald::EWALD,
+    box::Float64,
+)
+    partial_e = 0.0
+    partial_v = 0.0
+    overlap = false
+    # Calculate new ewald REAL energy
+    realEwald, overlap = EwaldReal(i, moa, soa, ewald,sim_props.qq_rcut, box)
+    realEwald *= ewald.factor
+    partial_e += realEwald
+    partial_v += (realEwald / 3)
+
     return partial_e, partial_v, overlap
 end

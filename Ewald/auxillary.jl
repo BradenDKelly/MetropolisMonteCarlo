@@ -5,6 +5,8 @@
 ##########
 using StaticArrays
 
+include("structs.jl")
+
 abstract type ForceField end
 abstract type Gromacs <: ForceField end
 abstract type GAFF <: ForceField end
@@ -83,6 +85,9 @@ mutable struct Properties2
     numTranAccepted::Int
     totalStepsTaken::Int
     quat::Vector{SVector{4,Float64}}
+    LJ_rcut::Float64
+    qq_rcut::Float64
+    box::Float64
 end
 
 

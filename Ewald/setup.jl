@@ -444,9 +444,13 @@ function MakeAtomArrays(systemTop::FFParameters,atomsPDB::Topology)
 end
 
 " The KMC Version"
-function MakeAtomArrays(systemTop::FFParameters,atomsPDB::Topology, mode::String)
+function MakeAtomArrays(systemTop::FFParameters,
+                        atomsPDB::Topology,
+                        quat::Vector{SVector{4,Float64}},
+                        mode::String
+                        )
 
-    pArray = Vector{ParticleAtomKMC{Float64,Int64}}(undef, length(atomsPDB.resnr))
+    pArray = Vector{ParticleAtomKMC}(undef, length(atomsPDB.resnr))
     # pArray
     if atomsPDB.resnr[1] != 1
         diff = Int(1 - atomsPDB.resnr[1])
@@ -517,11 +521,13 @@ function MakeAtomArrays(systemTop::FFParameters,atomsPDB::Topology, mode::String
         push!(COM,pArray[iter-1].coords)
         push!(mass,pArray[iter-1].mass)
 
-        centerOfMass = Center_of_Mass(COM,mass)
+        centerOfMass = SVector(Center_of_Mass(COM,mass)...)
 
         ed = iter - 1
         mol = FindMolType(String(atomsPDB.resnm[acount]),moleculeList )
-        molTracker[mcount] = Molecule( start, ed, centerOfMass, 0.0, mol)
+        molTracker[mcount] = Molecule( start, ed, centerOfMass,SVector(quat[mcount]...),
+                                        0.0, mol
+                                    )
         iter += 1
 
     end
